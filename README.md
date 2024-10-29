@@ -20,7 +20,7 @@ debugging, analytics, and ensuring the integrity of player preferences within yo
 
 ### 1. **Download the Plugin**
 
-Clone the repository or download the latest release from GitLab.
+Clone the repository or download the latest release from GitHub.
 
 ```bash
 git clone https://github.com/Udovychenko-Dmytro/PlayerPrefs-Runtime-Tool.git
@@ -39,7 +39,7 @@ To enable the PlayerPrefsRuntime Tool, define the `PLAYER_PREFS_RUNTIME_TOOL` sc
 
 Go to `Edit > Project Settings > Player`.
 Under the Other Settings tab, find Scripting Define Symbols.
-Add PLAYER_PREFS_RUNTIME_TOOL to the list, separated by a semicolon if other symbols are present.
+Add `PLAYER_PREFS_RUNTIME_TOOL` to the list, separated by a semicolon if other symbols are present.
 
 ## Usage
 ```bash

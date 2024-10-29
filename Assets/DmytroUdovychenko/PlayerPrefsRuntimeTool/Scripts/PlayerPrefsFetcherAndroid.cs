@@ -24,7 +24,6 @@ namespace DmytroUdovychenko.PlayerPrefsRuntimeTool
             {
                 Debug.Log("Attempting to fetch PlayerPrefs on Android");
 
-                // Get the UnityPlayer class
                 using (AndroidJavaClass unityPlayer = new AndroidJavaClass("com.unity3d.player.UnityPlayer"))
                 {
                     using (AndroidJavaObject currentActivity = unityPlayer.GetStatic<AndroidJavaObject>("currentActivity"))
@@ -47,7 +46,6 @@ namespace DmytroUdovychenko.PlayerPrefsRuntimeTool
                                     {
                                         using (entry)
                                         {
-                                            // Get the key and value object
                                             string key = entry.Call<string>("getKey");
                                             string formatedKey = Uri.UnescapeDataString(key);
                                             AndroidJavaObject valueObject = entry.Call<AndroidJavaObject>("getValue");

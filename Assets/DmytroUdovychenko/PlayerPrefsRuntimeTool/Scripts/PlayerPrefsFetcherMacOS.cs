@@ -17,11 +17,9 @@ namespace DmytroUdovychenko.PlayerPrefsRuntimeTool
 {
     public class PlayerPrefsRuntimeFetcherMacOS : IPlayerPrefsRuntimeFetcher
     {
-        // Import the native method to get PlayerPrefs as JSON
         [DllImport("__Internal")]
         private static extern System.IntPtr GetPlayerPrefsJSON();
 
-        // Import the native method to free allocated memory
         [DllImport("__Internal")]
         private static extern void FreeMemory(System.IntPtr ptr);
 
@@ -40,11 +38,9 @@ namespace DmytroUdovychenko.PlayerPrefsRuntimeTool
                     return prefs;
                 }
 
-                // Convert the native pointer to a C# string
                 string jsonPrefs = Marshal.PtrToStringAnsi(jsonPtr);
                 Debug.Log($"Received JSON: {jsonPrefs}");
 
-                // Free the allocated memory in the native plugin
                 FreeMemory(jsonPtr);
 
                 if (!string.IsNullOrEmpty(jsonPrefs))
@@ -64,11 +60,6 @@ namespace DmytroUdovychenko.PlayerPrefsRuntimeTool
             return prefs;
         }
 
-        /// <summary>
-        /// Deserializes the JSON string into a dictionary.
-        /// </summary>
-        /// <param name="json">The JSON string representing PlayerPrefs.</param>
-        /// <returns>A dictionary with PlayerPrefs keys and values.</returns>
         private Dictionary<string, object> DeserializeJSON(string json)
         {
             Dictionary<string, object> dict = new Dictionary<string, object>();
@@ -83,7 +74,6 @@ namespace DmytroUdovychenko.PlayerPrefsRuntimeTool
                 dict = JsonConvert.DeserializeObject<Dictionary<string, object>>(json);
                 Debug.Log("JSON deserialization successful.");
 
-                // Handle data type conversions
                 var keys = new List<string>(dict.Keys);
                 foreach (var key in keys)
                 {

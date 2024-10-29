@@ -68,6 +68,9 @@ namespace DmytroUdovychenko.PlayerPrefsRuntimeTool
             }
         }
 
+        /// <summary>
+        /// Add data to the playerprefs ti see if it works correct
+        /// </summary>
         public static void AddTestPlayerPrefs()
         {
             PlayerPrefs.SetString("PLAYER PREFS RUNTIME", "HELLO w@rлД?!");

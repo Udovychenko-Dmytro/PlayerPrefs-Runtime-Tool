@@ -17,7 +17,6 @@ namespace DmytroUdovychenko.PlayerPrefsRuntimeTool
 {
     public class PlayerPrefsRuntimeFetcheriOS : IPlayerPrefsRuntimeFetcher
     {
-        // Import native methods
         [DllImport("__Internal")]
         private static extern System.IntPtr GetPlayerPrefsJSON();
 
@@ -42,7 +41,6 @@ namespace DmytroUdovychenko.PlayerPrefsRuntimeTool
                 string jsonPrefs = Marshal.PtrToStringAnsi(jsonPtr);
                 Debug.Log($"Received JSON: {jsonPrefs}");
 
-                // Free the allocated memory in the native code
                 FreeMemory(jsonPtr);
 
                 if (!string.IsNullOrEmpty(jsonPrefs))

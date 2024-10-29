@@ -23,7 +23,8 @@ extern "C" char* GetPlayerPrefsJSON()
             if ([value isKindOfClass:[NSString class]] ||
                 [value isKindOfClass:[NSNumber class]]) {
                 serializableDict[key] = value;
-                //NSLog(@"Key: %@, Value: %@", key, value); //Log keys
+                //Log kvp
+                //NSLog(@"Key: %@, Value: %@", key, value);
             }
         }
         
@@ -42,11 +43,9 @@ extern "C" char* GetPlayerPrefsJSON()
         NSString *jsonString = [[NSString alloc] initWithData:jsonData encoding:NSUTF8StringEncoding];
         NSLog(@"JSON String: %@", jsonString);
         
-        // Get a C-style string from the NSString
         const char* utf8String = [jsonString UTF8String];
         size_t length = strlen(utf8String) + 1;
         
-        // Allocate memory for the C-style string and copy it
         char* buffer = (char*)malloc(length);
         strcpy(buffer, utf8String);
         
@@ -54,7 +53,6 @@ extern "C" char* GetPlayerPrefsJSON()
     }
 }
 
-// Exported function to free allocated memory
 extern "C" void FreeMemory(char* ptr)
 {
     if (ptr != NULL) {

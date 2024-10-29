@@ -8,7 +8,6 @@
 // ====================================================
 #import <Foundation/Foundation.h>
 
-// Exported function to get PlayerPrefs as JSON string
 extern "C" char* GetPlayerPrefsJSON()
 {
     @autoreleasepool {
@@ -29,7 +28,7 @@ extern "C" char* GetPlayerPrefsJSON()
 
         if (!dict) {
             NSLog(@"Failed to read plist. Returning empty JSON.");
-            // Allocate memory for an empty JSON string
+            
             char* emptyString = (char*)malloc(3);
             strcpy(emptyString, "{}");
             return emptyString;
@@ -41,7 +40,7 @@ extern "C" char* GetPlayerPrefsJSON()
 
         if (!jsonData) {
             NSLog(@"Error converting PlayerPrefs to JSON: %@", error);
-            // Allocate memory for an empty JSON string
+            
             char* emptyString = (char*)malloc(3);
             strcpy(emptyString, "{}");
             return emptyString;
@@ -52,11 +51,9 @@ extern "C" char* GetPlayerPrefsJSON()
         // Log Json data
         NSLog(@"JSON String: %@", jsonString);
 
-        // Get a C-style string from the NSString
         const char* utf8String = [jsonString UTF8String];
         size_t length = strlen(utf8String) + 1;
 
-        // Allocate memory for the C-style string and copy it
         char* buffer = (char*)malloc(length);
         strcpy(buffer, utf8String);
 
@@ -64,7 +61,6 @@ extern "C" char* GetPlayerPrefsJSON()
     }
 }
 
-// Exported function to free allocated memory
 extern "C" void FreeMemory(char* ptr)
 {
     if (ptr != NULL) {

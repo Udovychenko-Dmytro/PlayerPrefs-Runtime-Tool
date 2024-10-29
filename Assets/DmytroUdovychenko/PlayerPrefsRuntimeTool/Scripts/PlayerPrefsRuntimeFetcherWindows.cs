@@ -58,8 +58,6 @@ namespace DmytroUdovychenko.PlayerPrefsRuntimeTool
 
                 string companyName = Application.companyName;
                 string productName = Application.productName;
-
-                // Build registry path
                 string registryPath = $@"Software\{companyName}\{productName}";
 
                 Debug.Log($"Registry Path: {registryPath}");
@@ -87,7 +85,6 @@ namespace DmytroUdovychenko.PlayerPrefsRuntimeTool
                     uint dataSize = dataCapacity;
                     uint type;
 
-                    // Enumerate the values
                     int enumResult = RegEnumValue(hKey, index, valueName, ref valueNameSize, IntPtr.Zero, out type, data, ref dataSize);
 
                     if (enumResult != 0)
@@ -105,12 +102,11 @@ namespace DmytroUdovychenko.PlayerPrefsRuntimeTool
                         case REG_SZ:
                         case REG_EXPAND_SZ:
                         {
-                            // dataSize includes the null terminator in bytes
                             int stringLength = (int) dataSize - 2; // Subtract 2 bytes for the null terminator (Unicode)
                             if (stringLength > 0)
                             {
                                 value = Encoding.Unicode.GetString(data, 0, stringLength);
-                                // Try parsing as float
+  
                                 if (float.TryParse(value.ToString(), out float floatValue))
                                 {
                                     value = floatValue;
@@ -143,7 +139,6 @@ namespace DmytroUdovychenko.PlayerPrefsRuntimeTool
                         }
                         case REG_BINARY:
                         {
-                            // Try to decode binary data as UTF-8 string
                             if (dataSize > 0)
                             {
                                 string stringValue = Encoding.UTF8.GetString(data, 0, (int) dataSize);
@@ -173,7 +168,6 @@ namespace DmytroUdovychenko.PlayerPrefsRuntimeTool
                     }
 
                     index++;
-                    // No need to clear valueName or data since they are re-initialized each time
                 }
 
                 RegCloseKey(hKey);
