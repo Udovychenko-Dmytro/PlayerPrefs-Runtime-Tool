@@ -1,0 +1,18 @@
+{
+    "name": "PlayerPrefsRuntime",
+    "rootNamespace": "DmytroUdovychenko.PlayerPrefsRuntimeTool",
+    "references": [
+        "UnityEngine.UI"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [
+        "PLAYER_PREFS_RUNTIME_TOOL"
+    ],
+    "versionDefines": [],
+    "noEngineReferences": false
+}
