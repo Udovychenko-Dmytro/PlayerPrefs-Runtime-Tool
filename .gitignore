@@ -31,6 +31,6 @@ sysinfo.txt
 
 # Builds
 *.apk
-# *.unitypackage
+//# *.unitypackage
 
 .vs/
