@@ -21,7 +21,7 @@ namespace DmytroUdovychenko.PlayerPrefsRuntimeTool
     {
         private static IPlayerPrefsRuntimeFetcher s_runtimeFetcher;
         private static PlayerPrefsRuntimeViewer s_viewer;
-        
+
         public static bool IsVisible => s_viewer != null && s_viewer.IsVisible;
 
         /// <summary>
@@ -89,13 +89,13 @@ namespace DmytroUdovychenko.PlayerPrefsRuntimeTool
         {
             Dictionary<string, object> allPrefs = GetAllPlayerPrefs();
             Debug.Log($"[PlayerPrefsRuntime] Found {allPrefs.Count} PlayerPrefs entries:");
-            
+
             foreach (KeyValuePair<string, object> kvp in allPrefs)
             {
                 Debug.Log($"[PlayerPrefsRuntime] Key: {kvp.Key}, Value: {kvp.Value} (Type: {kvp.Value?.GetType().Name ?? "null"})");
             }
         }
-        
+
         public static void ShowAllPlayerPrefs()
         {
             // Log all PlayerPrefs to console
@@ -103,7 +103,7 @@ namespace DmytroUdovychenko.PlayerPrefsRuntimeTool
 
             // Retrieve all PlayerPrefs as Dictionary <key, value>
             Dictionary<string, object> allPrefs = GetAllPlayerPrefs();
-            
+
             if (s_viewer == null)
             {
                 s_viewer = new PlayerPrefsRuntimeViewer();
@@ -113,7 +113,7 @@ namespace DmytroUdovychenko.PlayerPrefsRuntimeTool
             {
                 s_viewer.Hide();
             }
-            
+
             // Check if allPrefs is null or empty before proceeding
             if (allPrefs == null || allPrefs.Count == 0)
             {
@@ -127,7 +127,7 @@ namespace DmytroUdovychenko.PlayerPrefsRuntimeTool
                 List<PlayerPrefsRuntimeEntry> entries = allPrefs
                     .Select(kvp => new PlayerPrefsRuntimeEntry(kvp.Key, kvp.Value))
                     .ToList();
-            
+
                 s_viewer.ShowEntries(entries);
 
                 Debug.Log($"[PlayerPrefsRuntimeExample] Example completed. Found {allPrefs.Count} PlayerPrefs entries.");

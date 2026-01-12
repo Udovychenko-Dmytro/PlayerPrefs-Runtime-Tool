@@ -83,10 +83,16 @@ namespace DmytroUdovychenko.PlayerPrefsRuntimeTool
                                     {
                                         using (entry)
                                         {
-                                            if (entry == null) continue;
+                                            if (entry == null)
+                                            {
+                                                continue;
+                                            }
 
                                             string key = entry.Call<string>("getKey");
-                                            if (string.IsNullOrEmpty(key)) continue;
+                                            if (string.IsNullOrEmpty(key))
+                                            {
+                                                continue;
+                                            }
 
                                             string formattedKey = Uri.UnescapeDataString(key);
                                             using (AndroidJavaObject valueObject = entry.Call<AndroidJavaObject>("getValue"))

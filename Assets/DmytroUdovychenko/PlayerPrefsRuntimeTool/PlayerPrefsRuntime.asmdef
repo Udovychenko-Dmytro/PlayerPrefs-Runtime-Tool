@@ -2,7 +2,8 @@
     "name": "PlayerPrefsRuntime",
     "rootNamespace": "DmytroUdovychenko.PlayerPrefsRuntimeTool",
     "references": [
-        "UnityEngine.UI"
+        "UnityEngine.UI",
+        "Unity.InputSystem"
     ],
     "includePlatforms": [],
     "excludePlatforms": [],

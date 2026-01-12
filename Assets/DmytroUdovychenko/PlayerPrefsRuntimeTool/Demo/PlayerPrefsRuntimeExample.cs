@@ -7,7 +7,11 @@
 // ====================================================
 
 #if PLAYER_PREFS_RUNTIME_TOOL
-    using UnityEngine;
+using System.Text;
+using UnityEngine;
+#if ENABLE_INPUT_SYSTEM
+    using UnityEngine.InputSystem;
+#endif
 
 namespace DmytroUdovychenko.PlayerPrefsRuntimeTool
 {
@@ -16,7 +20,9 @@ namespace DmytroUdovychenko.PlayerPrefsRuntimeTool
     /// </summary>
     public class PlayerPrefsRuntimeExample : MonoBehaviour
     {
-        private PlayerPrefsRuntimeViewer viewer;
+        [SerializeField] private bool m_addTestValue = true;
+
+        private PlayerPrefsRuntimeViewer m_viewer;
 
         private const string TestValue = "Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. HELLO w@rлД?! こんにちはプレイヤー！ [1,2,3,4,5,6,7,8,9,0]";
 
@@ -28,15 +34,24 @@ namespace DmytroUdovychenko.PlayerPrefsRuntimeTool
         {
             Debug.Log("[PlayerPrefsRuntimeExample] Starting example");
 
-            // Add test PlayerPrefs data
-            AddTestPlayerPrefs();
-            Invoke(nameof(ToggleViewer), 0.5f);
+            if (m_addTestValue)
+            {
+                AddTestPlayerPrefs();
+            }
+
+            Invoke(nameof(ToggleViewer), 1f);
             Application.targetFrameRate = 60;
         }
 
         private void Update()
         {
+#if ENABLE_INPUT_SYSTEM && ENABLE_LEGACY_INPUT_MANAGER
+            if (Keyboard.current != null && Keyboard.current.pKey.wasPressedThisFrame || Input.GetKeyDown(KeyCode.P))
+#elif ENABLE_INPUT_SYSTEM
+            if (Keyboard.current != null && Keyboard.current.pKey.wasPressedThisFrame)
+#elif ENABLE_LEGACY_INPUT_MANAGER
             if (Input.GetKeyDown(KeyCode.P))
+#endif
             {
                 ToggleViewer();
             }
@@ -49,18 +64,20 @@ namespace DmytroUdovychenko.PlayerPrefsRuntimeTool
                 PlayerPrefsRuntime.ShowAllPlayerPrefs();
             }
         }
-        
+
         /// <summary>
         /// Adds test PlayerPrefs data for verification purposes.
         /// </summary>
         private void AddTestPlayerPrefs()
         {
-            string verylong = string.Empty;
+            StringBuilder verylong = new StringBuilder();
 
             for (int i = 0; i < 100; i++)
             {
-                verylong += TestValue + "\n";
+                verylong.AppendLine(TestValue);
             }
+
+            string longStringResult = verylong.ToString();
 
             PlayerPrefs.SetInt("TEST_INT", 42);
             PlayerPrefs.SetInt("TEST_INT_ZERO", 0);
@@ -74,10 +91,8 @@ namespace DmytroUdovychenko.PlayerPrefsRuntimeTool
             PlayerPrefs.SetString("PLAYER_PREFS_JP", "こんにちはプレイヤー！");
             PlayerPrefs.SetString("PLAYER_PREFS_SHORT", "OK");
             PlayerPrefs.SetString("PLAYER_PREFS_MEDIUM", "Sample medium-length string value.");
-            PlayerPrefs.SetString("PLAYER_PREFS_VERY_LONG", verylong);
-            PlayerPrefs.SetString(TestValue, verylong);
-            PlayerPrefs.SetString(
-                "PLAYER_PREFS_LONG", TestValue + TestValue + TestValue + TestValue + TestValue + TestValue + TestValue + TestValue + TestValue + TestValue);
+            PlayerPrefs.SetString("PLAYER_PREFS_VERY_LONG", longStringResult);
+            PlayerPrefs.SetString(TestValue, longStringResult);
             PlayerPrefs.SetString(
                 "PLAYER_PREFS_JSON",
                 "{\"audio\":{\"master\":0.8,\"music\":0.65,\"sfx\":1.0},\"video\":{\"resolution\":\"2560x1440\",\"fullscreen\":true}}");

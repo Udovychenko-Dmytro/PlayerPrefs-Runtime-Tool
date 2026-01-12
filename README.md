@@ -2,18 +2,24 @@
 [![version](https://img.shields.io/badge/package-download-brightgreen.svg)](PlayerPrefsRuntimeTool.unitypackage)
 
 # PlayerPrefsRuntime Tool
-`version 2.0`
+`version 3.0.1`
 ## Overview
 
-**PlayerPrefsRuntime Tool** is a Unity plugin that allows you to retrieve all `PlayerPrefs` at runtime across multiple platforms, including Android, iOS, Windows, and macOS (with Windows/macOS also supported in the Unity Editor). This tool is invaluable for debugging, analytics, and ensuring the integrity of player preferences within your Unity projects.
+**PlayerPrefsRuntime Tool** is a Unity plugin that allows you to retrieve and edit all `PlayerPrefs` at runtime across multiple platforms, including Android, iOS, Windows, and macOS (with Windows/macOS also supported in the Unity Editor). This tool is invaluable for debugging, analytics, testing, and managing player preferences within your Unity projects.
+
+## Dependencies
+
+**PlayerPrefsRuntime Tool** is a using json parser: "com.unity.nuget.newtonsoft-json": "3.2.1".
 
 ---
 ## Features
 
 - **Cross-Platform Support:** Compatible with `Android`, `iOS`, `Windows`, and `macOS` (plus Windows/macOS Editor).
 - **Runtime Access:** Retrieve all `PlayerPrefs` as a dictionary directly from the device/build (or editor storage on Windows/macOS).
+- **Live Editing (v3.0):** Edit, save, and delete `PlayerPrefs` entries directly from the runtime UI.
 - **Logging:** Display all `PlayerPrefs` data in the Unity Console for debugging purposes.
-- **Interactive UI Viewer:** Visual interface with search, sorting, and detailed entry inspection.
+- **Interactive UI Viewer:** Visual interface with search, sorting, detailed entry inspection, and edit mode.
+- **Type Validation:** Automatic validation for Int, Float, and String values with error feedback.
 - **Extensible Architecture:** Easily extendable to support additional platforms or functionalities.
 
 ### UI Viewer Features
@@ -35,20 +41,19 @@ The PlayerPrefsRuntime Tool includes a comprehensive visual UI viewer that provi
 - Dark theme with accent colors (blues, cyans)
 - Alternating even/odd row colors for readability
 - Color-coded type badges (Int, String, Float)
-- Interactive rows with hover effects
 - Safe area support for mobile devices
 
 **Interactive Features**
 - Click on any entry to view detailed information in a dialog
+- Toggle edit mode with the "Edit" button
+- Modify Int, Float, and String values directly
+- Save changes with the "Save" button
+- Delete entries with the "Delete" button
+- Real-time validation with error messages
+- Automatic UI refresh after saving or deleting
 - Close button to hide the viewer and clean up resources
 - Sort button to toggle between sorting modes
 - Search field with placeholder text
-
-**Performance Optimized**
-- Smooth scrolling with inertia and deceleration
-- Clamped movement type (no overscroll)
-- Optimized content sizing with proper masking
-- Handles large datasets (100+ entries) efficiently
 
 ## Notes & Limitations
 
@@ -57,7 +62,6 @@ The PlayerPrefsRuntime Tool includes a comprehensive visual UI viewer that provi
 - Android reads SharedPreferences from `${Application.identifier}.v2.playerprefs` and supports `int`, `float`, and `string` (other types are stringified).
 - iOS exports only `NSString`/`NSNumber` values from `NSUserDefaults` (other types are skipped).
 - macOS runtime reads `~/Library/Preferences/<bundleId>.plist` and serializes it to JSON; non-JSON plist types can cause an empty result. macOS Editor parsing supports XML and binary plists (via `plutil`).
-- iOS/macOS/macOS-Editor rely on `Newtonsoft.Json`; if your Unity version doesn't include it, add `com.unity.nuget.newtonsoft-json` via Package Manager.
 
 ### Platform Support Details
 
@@ -91,6 +95,27 @@ The PlayerPrefsRuntime Tool includes a comprehensive visual UI viewer that provi
 - Automatic normalization across platforms via `PlayerPrefsRuntimeJsonHelper`
 - Type consistency: Ensures long→int, double→float conversions
 - Null safety: Graceful handling of missing or corrupted data
+
+---
+## What's New in Version 3.0
+
+### Edit Mode
+The biggest addition in v3.0 is the ability to **edit PlayerPrefs at runtime**:
+
+- **Toggle Edit Mode:** Click any entry to open the detail dialog, then click "Edit" to enable editing
+- **Type-Safe Editing:** Validates input based on the entry type (Int, Float, String)
+- **Real-Time Validation:** Shows error messages for invalid input before saving
+- **Save Changes:** Click "Save" to apply changes directly to PlayerPrefs
+- **Delete Entries:** Remove unwanted entries with the "Delete" button
+- **Auto Refresh:** UI automatically updates after saving or deleting
+
+This makes it easy to test different values, fix corrupted data, or manage player preferences during development and debugging.
+
+### Use Cases
+- **Testing:** Quickly modify values to test different game states
+- **Debugging:** Fix corrupted or incorrect PlayerPrefs data on the fly
+- **QA:** Adjust test parameters without rebuilding the app
+- **Development:** Iterate faster by changing values in real-time
 
 ---
 ## Installation
@@ -167,6 +192,13 @@ public class PlayerPrefsRuntimeExample : MonoBehaviour
         
         // Show the interactive UI viewer
         PlayerPrefsRuntime.ShowAllPlayerPrefs();
+
+        // The UI viewer now supports editing (v3.0):
+        // 1. Click on any entry in the list
+        // 2. Click "Edit" button to enter edit mode
+        // 3. Modify the value in the input field
+        // 4. Click "Save" to apply changes
+        // 5. Click "Delete" to remove the entry
 #endif
     }
 }
@@ -184,13 +216,15 @@ The included demo scene (`Assets/DmytroUdovychenko/PlayerPrefsRuntimeTool/Demo/D
 **Interactive Demo**
 - Press **"P" key** to toggle the viewer (close via the **X** button)
 - Automatically shows viewer after 0.5s delay on start
-- Demonstrates complete workflow: add data → retrieve → display
+- Demonstrates complete workflow: add data → retrieve → display → edit
+- **Try editing:** Click any entry, press "Edit", modify the value, and save
 
 **Key Demo Features**
 - Full Unicode support (Cyrillic, Japanese, special characters)
 - Large dataset performance (100+ entries)
 - Cross-platform data consistency
 - Search and sorting with diverse data types
+- Live editing and validation
 
 To use the demo:
 1. Open the demo scene

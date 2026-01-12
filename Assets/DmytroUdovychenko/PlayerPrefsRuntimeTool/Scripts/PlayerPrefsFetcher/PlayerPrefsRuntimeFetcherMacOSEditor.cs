@@ -44,6 +44,7 @@ namespace DmytroUdovychenko.PlayerPrefsRuntimeTool
                 {
                     UnityDebug.Log("[PlayerPrefsRuntime] Detected binary plist format");
                     string json = ConvertBinaryPlistToJson(plistPath);
+                    
                     if (!string.IsNullOrEmpty(json))
                     {
                         prefs = DeserializeJsonPrefs(json);

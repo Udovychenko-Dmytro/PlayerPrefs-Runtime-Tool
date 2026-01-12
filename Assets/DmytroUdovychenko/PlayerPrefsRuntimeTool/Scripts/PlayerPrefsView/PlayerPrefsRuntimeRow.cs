@@ -7,6 +7,7 @@
 // ====================================================
 
 #if PLAYER_PREFS_RUNTIME_TOOL
+using System;
 using UnityEngine;
 using UnityEngine.UI;
 
@@ -17,33 +18,80 @@ namespace DmytroUdovychenko.PlayerPrefsRuntimeTool
     /// </summary>
     internal class PlayerPrefsRuntimeRow
     {
-
-        public GameObject Create(
+        public PlayerPrefsRuntimeRowView Create(
             Transform parent,
+            Font font,
+            Color32 badgeColor)
+        {
+            GameObject row = new GameObject(PlayerPrefsRuntimeViewConstants.RowName, typeof(RectTransform), typeof(LayoutElement), typeof(Image), typeof(HorizontalLayoutGroup));
+            row.transform.SetParent(parent, false);
+
+            Image rowImage;
+            Button rowButton;
+            ConfigureRoot(row, out rowImage, out rowButton);
+
+            Text nameText = BuildName(row.transform, font);
+            Image badgeImage;
+            Text badgeLabel;
+            CreateTypeBadge(row.transform, font, badgeColor, out badgeImage, out badgeLabel);
+            Text valueText = BuildValue(row.transform, font);
+
+            AnimateEntry(row);
+
+            PlayerPrefsRuntimeRowView view = row.AddComponent<PlayerPrefsRuntimeRowView>();
+            view.Initialize(nameText, valueText, rowImage, badgeImage, badgeLabel, rowButton);
+            return view;
+        }
+
+        public void Update(
+            PlayerPrefsRuntimeRowView view,
             PlayerPrefsRuntimeEntry entry,
             bool even,
-            Font font,
             Color32 evenColor,
             Color32 oddColor,
             Color32 badgeColor,
-            System.Action<PlayerPrefsRuntimeEntry> onClick = null)
+            Action<PlayerPrefsRuntimeEntry> onClick)
         {
-            GameObject row = new GameObject("Row", typeof(RectTransform), typeof(LayoutElement), typeof(Image), typeof(HorizontalLayoutGroup));
-            row.transform.SetParent(parent, false);
+            if (view == null)
+            {
+                return;
+            }
 
-            ConfigureRoot(row, even ? evenColor : oddColor);
-            BuildName(entry, row.transform, font);
-            CreateTypeBadge(row.transform, entry.Type, font, badgeColor);
-            BuildValue(entry, row.transform, font);
-            
-            AddHoverEffect(row, even ? evenColor : oddColor);
-            AddClickHandler(row, entry, onClick);
-            AnimateEntry(row);
+            Color baseColor = even ? evenColor : oddColor;
+            if (view.RowImage != null)
+            {
+                view.RowImage.color = baseColor;
+            }
 
-            return row;
+            if (view.BadgeImage != null)
+            {
+                view.BadgeImage.color = badgeColor;
+            }
+
+            string entryName = entry.Name;
+            string entryValue = entry.Value;
+            string entryType = entry.Type;
+
+            if (view.NameText != null)
+            {
+                view.NameText.text = TruncateText(entryName, PlayerPrefsRuntimeViewConstants.MaxNameTextLength);
+            }
+
+            if (view.ValueText != null)
+            {
+                view.ValueText.text = string.IsNullOrEmpty(entryValue) ? PlayerPrefsRuntimeViewConstants.EmptyValueLabel : TruncateText(entryValue, PlayerPrefsRuntimeViewConstants.MaxValueTextLength);
+            }
+
+            if (view.BadgeLabel != null)
+            {
+                view.BadgeLabel.text = string.IsNullOrEmpty(entryType) ? PlayerPrefsRuntimeViewConstants.UnknownTypeLabel : entryType;
+            }
+
+            ApplyHoverEffect(view.Button, baseColor);
+            view.Bind(entry, onClick);
         }
 
-        private void ConfigureRoot(GameObject row, Color color)
+        private void ConfigureRoot(GameObject row, out Image rowImage, out Button rowButton)
         {
             RectTransform rowRT = row.GetComponent<RectTransform>();
             rowRT.anchorMin = new Vector2(0, 1);
@@ -51,7 +99,7 @@ namespace DmytroUdovychenko.PlayerPrefsRuntimeTool
             rowRT.pivot = new Vector2(0.5f, 1f);
 
             Image image = row.GetComponent<Image>();
-            image.color = color;
+            image.color = Color.clear;
 
             LayoutElement layout = row.GetComponent<LayoutElement>();
             layout.minHeight = PlayerPrefsRuntimeViewConstants.RowMinHeight;
@@ -64,36 +112,45 @@ namespace DmytroUdovychenko.PlayerPrefsRuntimeTool
             hlg.childForceExpandHeight = false;
             hlg.spacing = PlayerPrefsRuntimeViewConstants.RowSpacing;
             hlg.padding = new RectOffset(PlayerPrefsRuntimeViewConstants.RowPaddingHorizontal, PlayerPrefsRuntimeViewConstants.RowPaddingHorizontal, PlayerPrefsRuntimeViewConstants.RowPaddingVertical, PlayerPrefsRuntimeViewConstants.RowPaddingVertical);
-            
-            // Add a subtle hover effect
-            Button button = row.AddComponent<Button>();
-            button.transition = Selectable.Transition.None; // Disable default transition
+
+            Button button = row.GetComponent<Button>();
+            if (button == null)
+            {
+                button = row.AddComponent<Button>();
+            }
+
+            button.transition = Selectable.Transition.None;
+
+            rowImage = image;
+            rowButton = button;
         }
 
-        private void BuildName(PlayerPrefsRuntimeEntry entry, Transform parent, Font font)
+        private Text BuildName(Transform parent, Font font)
         {
-            Text nameText = CreateText("Name", parent, PlayerPrefsRuntimeViewConstants.NameFontSize, FontStyle.Bold, Color.white, TextAnchor.MiddleLeft, font);
-            nameText.text = TruncateText(entry.Name, PlayerPrefsRuntimeViewConstants.MaxNameTextLength);
+            Text nameText = CreateText(PlayerPrefsRuntimeViewConstants.NameName, parent, PlayerPrefsRuntimeViewConstants.NameFontSize, FontStyle.Bold, Color.white, TextAnchor.MiddleLeft, font);
             nameText.horizontalOverflow = HorizontalWrapMode.Wrap;
-            nameText.verticalOverflow = VerticalWrapMode.Overflow; // Allow text to expand vertically
-            
+            nameText.verticalOverflow = VerticalWrapMode.Overflow;
+
             LayoutElement nameLayout = nameText.gameObject.AddComponent<LayoutElement>();
             nameLayout.flexibleWidth = PlayerPrefsRuntimeViewConstants.NameFlexibleWidth;
             nameLayout.minWidth = PlayerPrefsRuntimeViewConstants.NameMinWidth;
             nameLayout.preferredWidth = 0f;
+
+            return nameText;
         }
 
-        private void BuildValue(PlayerPrefsRuntimeEntry entry, Transform parent, Font font)
+        private Text BuildValue(Transform parent, Font font)
         {
-            Text valueText = CreateText("Value", parent, PlayerPrefsRuntimeViewConstants.ValueFontSize, FontStyle.Normal, PlayerPrefsRuntimeViewConstants.ValueTextColor, TextAnchor.MiddleRight, font);
-            valueText.text = string.IsNullOrEmpty(entry.Value) ? "(empty)" : TruncateText(entry.Value, PlayerPrefsRuntimeViewConstants.MaxValueTextLength);
+            Text valueText = CreateText(PlayerPrefsRuntimeViewConstants.ValueName, parent, PlayerPrefsRuntimeViewConstants.ValueFontSize, FontStyle.Normal, PlayerPrefsRuntimeViewConstants.ValueTextColor, TextAnchor.MiddleRight, font);
             valueText.horizontalOverflow = HorizontalWrapMode.Wrap;
-            valueText.verticalOverflow = VerticalWrapMode.Overflow; // Allow text to expand vertically
-            
+            valueText.verticalOverflow = VerticalWrapMode.Overflow;
+
             LayoutElement valueLayout = valueText.gameObject.AddComponent<LayoutElement>();
             valueLayout.flexibleWidth = PlayerPrefsRuntimeViewConstants.ValueFlexibleWidth;
             valueLayout.minWidth = PlayerPrefsRuntimeViewConstants.ValueMinWidth;
             valueLayout.preferredWidth = 0f;
+
+            return valueText;
         }
 
         private Text CreateText(string name, Transform parent, int size, FontStyle style, Color color, TextAnchor anchor, Font font)
@@ -112,34 +169,30 @@ namespace DmytroUdovychenko.PlayerPrefsRuntimeTool
             return text;
         }
 
-        /// <summary>
-        /// Truncates text to the specified maximum length, adding an ellipsis if truncated.
-        /// </summary>
-        /// <param name="text">The text to truncate</param>
-        /// <param name="maxLength">The maximum length of the text</param>
-        /// <returns>Truncated text with ellipsis if needed</returns>
         private string TruncateText(string text, int maxLength)
         {
             if (string.IsNullOrEmpty(text) || text.Length <= maxLength)
+            {
                 return text;
-                
-            // Ensure we have enough space for the suffix
+            }
+
             int suffixLength = PlayerPrefsRuntimeViewConstants.TextOverflowSuffix.Length;
             if (maxLength <= suffixLength)
+            {
                 return PlayerPrefsRuntimeViewConstants.TextOverflowSuffix;
-                
+            }
+
             return text.Substring(0, maxLength - suffixLength) + PlayerPrefsRuntimeViewConstants.TextOverflowSuffix;
         }
 
-        private void CreateTypeBadge(Transform parent, string type, Font font, Color32 badgeColor)
+        private void CreateTypeBadge(Transform parent, Font font, Color32 badgeColor, out Image badgeImage, out Text badgeLabel)
         {
-            GameObject badge = new GameObject("TypeBadge", typeof(RectTransform), typeof(Image), typeof(LayoutElement));
+            GameObject badge = new GameObject(PlayerPrefsRuntimeViewConstants.TypeBadgeName, typeof(RectTransform), typeof(Image), typeof(LayoutElement));
             badge.transform.SetParent(parent, false);
-            Image badgeImage = badge.GetComponent<Image>();
-            badgeImage.color = badgeColor;
-            badgeImage.raycastTarget = false;
-            
-            // Add rounded corners effect
+            Image badgeImageComponent = badge.GetComponent<Image>();
+            badgeImageComponent.color = badgeColor;
+            badgeImageComponent.raycastTarget = false;
+
             Outline outline = badge.AddComponent<Outline>();
             outline.effectColor = PlayerPrefsRuntimeViewConstants.BadgeOutlineColor;
             outline.effectDistance = new Vector2(1f, -1f);
@@ -158,21 +211,23 @@ namespace DmytroUdovychenko.PlayerPrefsRuntimeTool
             badgeRT.anchorMax = middlePosition;
             badgeRT.pivot = middlePosition;
 
-            Text label = CreateText("Label", badge.transform, PlayerPrefsRuntimeViewConstants.BadgeFontSize, FontStyle.Bold, PlayerPrefsRuntimeViewConstants.BadgeLabelColor, TextAnchor.MiddleCenter, font);
-            label.text = string.IsNullOrEmpty(type) ? "Unknown" : type;
-            
-            // Add shadow effect to badge text
+            Text label = CreateText(PlayerPrefsRuntimeViewConstants.LabelName, badge.transform, PlayerPrefsRuntimeViewConstants.BadgeFontSize, FontStyle.Bold, PlayerPrefsRuntimeViewConstants.BadgeLabelColor, TextAnchor.MiddleCenter, font);
+
             Shadow shadow = label.gameObject.AddComponent<Shadow>();
             shadow.effectColor = PlayerPrefsRuntimeViewConstants.BadgeShadowColor;
             shadow.effectDistance = new Vector2(1f, -1f);
+
+            badgeImage = badgeImageComponent;
+            badgeLabel = label;
         }
-        
-        private void AddHoverEffect(GameObject row, Color baseColor)
+
+        private void ApplyHoverEffect(Button button, Color baseColor)
         {
-            Button button = row.GetComponent<Button>();
-            if (button == null) return;
-            
-            // Create color blocks for normal and highlighted states
+            if (button == null)
+            {
+                return;
+            }
+
             ColorBlock colors = button.colors;
             colors.normalColor = baseColor;
             colors.highlightedColor = PlayerPrefsRuntimeViewConstants.RowColorEven;
@@ -180,24 +235,13 @@ namespace DmytroUdovychenko.PlayerPrefsRuntimeTool
             colors.selectedColor = baseColor;
             colors.disabledColor = baseColor;
             colors.fadeDuration = 0.1f;
-            
+
             button.colors = colors;
             button.transition = Selectable.Transition.ColorTint;
         }
-        
-        private void AddClickHandler(GameObject row, PlayerPrefsRuntimeEntry entry, System.Action<PlayerPrefsRuntimeEntry> onClick)
-        {
-            if (onClick == null) return;
-            
-            Button button = row.GetComponent<Button>();
-            if (button == null) return;
-            
-            button.onClick.AddListener(() => onClick(entry));
-        }
-        
+
         private void AnimateEntry(GameObject row)
         {
-            // TODO: Add a subtle scale animation when the row is created
             RectTransform rt = row.GetComponent<RectTransform>();
             rt.localScale = new Vector2(0.95f, 0.95f);
         }
