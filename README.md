@@ -11,7 +11,7 @@ A runtime viewer and editor for every PlayerPrefs entry, on device and in the ed
 [![license](https://img.shields.io/badge/license-MIT-brightgreen?style=flat-square&label=License)](LICENSE)
 ![platform](https://img.shields.io/badge/Platform-Runtime%20%2B%20Editor-blue?style=flat-square)
 
-[![download](https://img.shields.io/badge/download-PlayerPrefs_Runtime_Tool_3.1.0-2ea44f?style=for-the-badge&logo=unity&logoColor=white&labelColor=555555)](https://github.com/Udovychenko-Dmytro/PlayerPrefs-Runtime-Tool/releases/download/v3.1.0/PlayerPrefsRuntimeTool-3.1.0.unitypackage)
+[![download](https://img.shields.io/badge/download-PlayerPrefs_Runtime_Tool_3.1.0-2ea44f?style=for-the-badge&logo=unity&logoColor=white&labelColor=555555)](https://github.com/Udovychenko-Dmytro/PlayerPrefs-Runtime-Tool/releases/download/3.1.0/PlayerPrefsRuntimeTool-3.1.0.unitypackage)
 
 </div>
 
@@ -180,7 +180,7 @@ This makes it easy to test different values, fix corrupted data, or manage playe
 **Option A (recommended):** Get from Unity Asset Store:
 - [PlayerPrefs Runtime Tool with Viewer](https://assetstore.unity.com/packages/tools/utilities/playerprefs-runtime-tool-with-viewer-304550)
 
-**Option B:** Download [`PlayerPrefsRuntimeTool-3.1.0.unitypackage`](https://github.com/Udovychenko-Dmytro/PlayerPrefs-Runtime-Tool/releases/download/v3.1.0/PlayerPrefsRuntimeTool-3.1.0.unitypackage) from the [latest release](https://github.com/Udovychenko-Dmytro/PlayerPrefs-Runtime-Tool/releases/latest) and import it via `Assets > Import Package > Custom Package`.
+**Option B:** Download [`PlayerPrefsRuntimeTool-3.1.0.unitypackage`](https://github.com/Udovychenko-Dmytro/PlayerPrefs-Runtime-Tool/releases/download/3.1.0/PlayerPrefsRuntimeTool-3.1.0.unitypackage) from the [latest release](https://github.com/Udovychenko-Dmytro/PlayerPrefs-Runtime-Tool/releases/latest) and import it via `Assets > Import Package > Custom Package`.
 
 **Option C:** Clone the repository and copy `Assets/DmytroUdovychenko/PlayerPrefsRuntimeTool` into your Unity project:
 
