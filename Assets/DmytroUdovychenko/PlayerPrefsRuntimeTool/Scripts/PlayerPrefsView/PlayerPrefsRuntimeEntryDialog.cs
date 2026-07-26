@@ -18,6 +18,8 @@ namespace DmytroUdovychenko.PlayerPrefsRuntimeTool
     /// </summary>
     internal class PlayerPrefsRuntimeEntryDialog
     {
+        private readonly PlayerPrefsRuntimeConfirmDialog m_confirmDialog = new PlayerPrefsRuntimeConfirmDialog();
+
         private bool m_isEditMode;
         private GameObject m_dialogRoot;
         private InputField m_valueInputField;
@@ -40,51 +42,10 @@ namespace DmytroUdovychenko.PlayerPrefsRuntimeTool
             m_currentEntry = entry;
             m_onEntryUpdated = onEntryUpdated;
 
-            Font resolvedFont = font != null ? font : Resources.GetBuiltinResource<Font>(PlayerPrefsRuntimeViewConstants.ArialFontName);
+            Font resolvedFont = font != null ? font : PlayerPrefsRuntimeUiFactory.ResolveDefaultFont();
 
-            GameObject overlay = new GameObject(PlayerPrefsRuntimeViewConstants.OverlayName, typeof(RectTransform));
-            overlay.transform.SetParent(parent, false);
-            overlay.transform.SetAsLastSibling();
-
-            RectTransform overlayRT = overlay.GetComponent<RectTransform>();
-            overlayRT.anchorMin = Vector2.zero;
-            overlayRT.anchorMax = Vector2.one;
-            overlayRT.offsetMin = Vector2.zero;
-            overlayRT.offsetMax = Vector2.zero;
-
-            GameObject backdrop = new GameObject(PlayerPrefsRuntimeViewConstants.BackdropName, typeof(RectTransform), typeof(Image), typeof(Button));
-            backdrop.transform.SetParent(overlay.transform, false);
-
-            RectTransform backdropRT = backdrop.GetComponent<RectTransform>();
-            backdropRT.anchorMin = Vector2.zero;
-            backdropRT.anchorMax = Vector2.one;
-            backdropRT.offsetMin = Vector2.zero;
-            backdropRT.offsetMax = Vector2.zero;
-
-            Image backdropImage = backdrop.GetComponent<Image>();
-            backdropImage.color = new Color(PlayerPrefsRuntimeViewConstants.BackdropColor.r, PlayerPrefsRuntimeViewConstants.BackdropColor.g, PlayerPrefsRuntimeViewConstants.BackdropColor.b, 0.85f);
-
-            Button backdropButton = backdrop.GetComponent<Button>();
-            backdropButton.transition = Selectable.Transition.None;
-            backdropButton.onClick.AddListener(Close);
-
-            GameObject dialog = new GameObject(PlayerPrefsRuntimeViewConstants.DialogName, typeof(RectTransform), typeof(Image), typeof(Outline));
-            dialog.transform.SetParent(overlay.transform, false);
-            dialog.transform.SetAsLastSibling();
-
-            RectTransform dialogRT = dialog.GetComponent<RectTransform>();
-            dialogRT.anchorMin = new Vector2(0.02f, 0.02f);
-            dialogRT.anchorMax = new Vector2(0.98f, 0.98f);
-            dialogRT.offsetMin = Vector2.zero;
-            dialogRT.offsetMax = Vector2.zero;
-            dialogRT.pivot = new Vector2(0.5f, 0.5f);
-
-            Image dialogImage = dialog.GetComponent<Image>();
-            dialogImage.color = PlayerPrefsRuntimeViewConstants.PanelColor;
-
-            Outline dialogOutline = dialog.GetComponent<Outline>();
-            dialogOutline.effectColor = PlayerPrefsRuntimeViewConstants.OutlineEffectColor;
-            dialogOutline.effectDistance = new Vector2(3f, -3f);
+            GameObject overlay = PlayerPrefsRuntimeUiFactory.CreateOverlay(PlayerPrefsRuntimeViewConstants.OverlayName, parent, Close, 0.85f);
+            GameObject dialog = PlayerPrefsRuntimeUiFactory.CreateDialogPanel(overlay.transform, PlayerPrefsRuntimeViewConstants.DialogName, new Vector2(0.02f, 0.02f), new Vector2(0.98f, 0.98f));
 
             GameObject contentRoot = new GameObject(PlayerPrefsRuntimeViewConstants.ContentName, typeof(RectTransform), typeof(VerticalLayoutGroup));
             contentRoot.transform.SetParent(dialog.transform, false);
@@ -129,7 +90,7 @@ namespace DmytroUdovychenko.PlayerPrefsRuntimeTool
             Text typeText = CreateText(PlayerPrefsRuntimeViewConstants.TypeBadgeName, contentRoot.transform, PlayerPrefsRuntimeViewConstants.DialogTypeFontSize, FontStyle.BoldAndItalic, PlayerPrefsRuntimeViewConstants.ValueTextColor, TextAnchor.UpperLeft, false, resolvedFont, out _);
             if (typeText != null)
             {
-                typeText.text = $"Type: {entry.Type}";
+                typeText.text = string.Format(PlayerPrefsRuntimeViewConstants.EntrySizeFormat, entry.Type, PlayerPrefsRuntimeEntry.FormatByteSize(entry.EstimateValueSizeBytes()));
                 LayoutElement typeLayout = typeText.gameObject.AddComponent<LayoutElement>();
                 typeLayout.preferredHeight = 30f;
                 typeLayout.flexibleHeight = 0;
@@ -213,7 +174,7 @@ namespace DmytroUdovychenko.PlayerPrefsRuntimeTool
                 valueText.raycastTarget = false;
                 valueText.horizontalOverflow = HorizontalWrapMode.Wrap;
                 valueText.verticalOverflow = VerticalWrapMode.Overflow;
-                valueText.text = string.IsNullOrEmpty(entry.Value) ? PlayerPrefsRuntimeViewConstants.EmptyValueLabel : entry.Value;
+                valueText.text = PlayerPrefsRuntimeValueDisplay.FormatForDisplay(entry.Value);
                 valueText.alignment = TextAnchor.UpperLeft;
 
                 LayoutElement valueTextLayout = valueText.gameObject.AddComponent<LayoutElement>();
@@ -292,118 +253,69 @@ namespace DmytroUdovychenko.PlayerPrefsRuntimeTool
             saveButton.onClick.AddListener(SaveEntry);
             m_saveButton.SetActive(false);
 
-            Button copyButton = CreateActionButton(PlayerPrefsRuntimeViewConstants.CopyButtonName, actions.transform, PlayerPrefsRuntimeViewConstants.CopyLabel, resolvedFont, out _, out _);
-            copyButton.onClick.AddListener(() => CopyEntryToClipboard(entry));
+            Button copyButton = CreateActionButton(PlayerPrefsRuntimeViewConstants.CopyButtonName, actions.transform, PlayerPrefsRuntimeViewConstants.CopyAllLabel, resolvedFont, out _, out _);
+            copyButton.onClick.AddListener(CopyEntryToClipboard);
+
+            Button copyValueButton = CreateActionButton(PlayerPrefsRuntimeViewConstants.CopyValueButtonName, actions.transform, PlayerPrefsRuntimeViewConstants.CopyValueLabel, resolvedFont, out _, out _);
+            copyValueButton.onClick.AddListener(CopyCurrentValueToClipboard);
 
             Button removeButton = CreateActionButton(PlayerPrefsRuntimeViewConstants.RemoveButtonName, actions.transform, PlayerPrefsRuntimeViewConstants.RemoveLabel, resolvedFont, out _, out GameObject removeButtonGoText);
-            removeButton.onClick.AddListener(() => RemoveEntry(entry, onEntryRemoved));
+            removeButton.onClick.AddListener(() => m_confirmDialog.Show(
+                overlay.transform,
+                resolvedFont,
+                string.Format(PlayerPrefsRuntimeViewConstants.RemoveConfirmTitleFormat, string.IsNullOrEmpty(entry.Name) ? PlayerPrefsRuntimeViewConstants.UnnamedLabel : entry.Name),
+                PlayerPrefsRuntimeViewConstants.RemoveConfirmMessage,
+                PlayerPrefsRuntimeViewConstants.DeleteLabel,
+                () => RemoveEntry(entry, onEntryRemoved)));
             removeButtonGoText.GetComponent<RectTransform>().sizeDelta = new Vector2(150f, 100f);
 
-            GameObject closeGo = new GameObject(PlayerPrefsRuntimeViewConstants.CloseButtonName, typeof(RectTransform), typeof(Image), typeof(Button));
-            closeGo.transform.SetParent(dialog.transform, false);
-            RectTransform closeRT = closeGo.GetComponent<RectTransform>();
-            closeRT.anchorMin = new Vector2(1f, 1f);
-            closeRT.anchorMax = new Vector2(1f, 1f);
-            closeRT.pivot = new Vector2(1f, 1f);
-            closeRT.sizeDelta = new Vector2(64f, 64f);
-            closeRT.anchoredPosition = new Vector2(-18f, -18f);
-
-            Image closeImage = closeGo.GetComponent<Image>();
-            closeImage.color = PlayerPrefsRuntimeViewConstants.CloseButtonNormalColor;
-
-            Button closeButton = closeGo.GetComponent<Button>();
-            closeButton.targetGraphic = closeImage;
-            closeButton.onClick.AddListener(Close);
-
-            ColorBlock closeColors = closeButton.colors;
-            closeColors.highlightedColor = PlayerPrefsRuntimeViewConstants.CloseButtonHighlightedColor;
-            closeColors.pressedColor = PlayerPrefsRuntimeViewConstants.CloseButtonPressedColor;
-            closeColors.fadeDuration = 0.1f;
-            closeButton.colors = closeColors;
-
-            Text closeText = CreateText(PlayerPrefsRuntimeViewConstants.LabelName, closeGo.transform, PlayerPrefsRuntimeViewConstants.DialogCloseButtonFontSize, FontStyle.Bold, Color.white, TextAnchor.MiddleCenter, false, resolvedFont, out _);
-            if (closeText != null)
-            {
-                closeText.text = PlayerPrefsRuntimeViewConstants.CloseButtonText;
-            }
+            PlayerPrefsRuntimeUiFactory.CreateDialogCloseButton(dialog.transform, resolvedFont, Close);
 
             m_dialogRoot = overlay;
         }
 
         public void Close()
         {
-            if (m_dialogRoot == null)
+            if (m_dialogRoot != null)
             {
-                return;
+                UnityEngine.Object.Destroy(m_dialogRoot);
             }
 
-            UnityEngine.Object.Destroy(m_dialogRoot);
             m_dialogRoot = null;
+            m_valueInputField = null;
+            m_valueTextObject = null;
+            m_editButton = null;
+            m_saveButton = null;
+            m_errorTextObject = null;
+            m_isEditMode = false;
+            m_currentEntry = default;
+            m_onEntryUpdated = null;
         }
 
         private Text CreateText(string name, Transform parent, int fontSize, FontStyle style, Color color, TextAnchor anchor, bool emphasize, Font font, out GameObject gameObject)
         {
-            gameObject = new GameObject(name, typeof(RectTransform), typeof(Text));
-            gameObject.transform.SetParent(parent, false);
-
-            Text text = gameObject.GetComponent<Text>();
-            text.font = font;
-            text.fontSize = fontSize;
-            text.fontStyle = style;
-            text.color = color;
-            text.alignment = anchor;
-            text.horizontalOverflow = HorizontalWrapMode.Wrap;
-            text.verticalOverflow = VerticalWrapMode.Truncate;
-
-            if (emphasize)
-            {
-                Shadow shadow = gameObject.AddComponent<Shadow>();
-                shadow.effectColor = PlayerPrefsRuntimeViewConstants.TextShadowColor;
-                shadow.effectDistance = new Vector2(1.8f, -1.8f);
-            }
-
-            return text;
+            return PlayerPrefsRuntimeUiFactory.CreateText(name, parent, fontSize, style, color, anchor, emphasize, font, out gameObject);
         }
 
         private Button CreateActionButton(string name, Transform parent, string label, Font font, out GameObject buttonGo, out GameObject textGo)
         {
-            buttonGo = new GameObject(name, typeof(RectTransform), typeof(Image), typeof(Button), typeof(LayoutElement));
-            buttonGo.transform.SetParent(parent, false);
-
-            RectTransform buttonRT = buttonGo.GetComponent<RectTransform>();
-            buttonRT.sizeDelta = new Vector2(0f, 60f);
-
-            Image buttonImage = buttonGo.GetComponent<Image>();
-            buttonImage.color = PlayerPrefsRuntimeViewConstants.ControlNormalColor;
-
-            Button button = buttonGo.GetComponent<Button>();
-            button.targetGraphic = buttonImage;
-
-            ColorBlock colors = button.colors;
-            colors.normalColor = PlayerPrefsRuntimeViewConstants.ControlNormalColor;
-            colors.highlightedColor = PlayerPrefsRuntimeViewConstants.ControlHighlightedColor;
-            colors.pressedColor = PlayerPrefsRuntimeViewConstants.ControlPressedColor;
-            colors.fadeDuration = 0.1f;
-            button.colors = colors;
-
-            LayoutElement layout = buttonGo.GetComponent<LayoutElement>();
-            layout.flexibleWidth = 1f;
-            layout.preferredHeight = 60f;
-            layout.minWidth = 0f;
-
-            Text labelText = CreateText(PlayerPrefsRuntimeViewConstants.LabelName, buttonGo.transform, PlayerPrefsRuntimeViewConstants.DialogCloseButtonFontSize, FontStyle.Bold, Color.white, TextAnchor.MiddleCenter, false, font, out textGo);
-            labelText.text = label;
-
-            return button;
+            return PlayerPrefsRuntimeUiFactory.CreateActionButton(name, parent, label, font, out buttonGo, out textGo);
         }
 
-        private void CopyEntryToClipboard(PlayerPrefsRuntimeEntry entry)
+        private void CopyEntryToClipboard()
         {
+            PlayerPrefsRuntimeEntry entry = m_currentEntry;
             string key = string.IsNullOrEmpty(entry.Name) ? PlayerPrefsRuntimeViewConstants.UnnamedLabel : entry.Name;
             string value = string.IsNullOrEmpty(entry.Value) ? PlayerPrefsRuntimeViewConstants.EmptyValueLabel : entry.Value;
             string type = string.IsNullOrEmpty(entry.Type) ? PlayerPrefsRuntimeViewConstants.UnknownTypeLabel : entry.Type;
 
             GUIUtility.systemCopyBuffer = $"Key: {key}\nType: {type}\nValue: {value}";
+        }
+
+        private void CopyCurrentValueToClipboard()
+        {
+            // Copies the raw value (not the pretty-printed form) so it round-trips exactly.
+            GUIUtility.systemCopyBuffer = string.IsNullOrEmpty(m_currentEntry.Value) ? string.Empty : m_currentEntry.Value;
         }
 
         private void RemoveEntry(PlayerPrefsRuntimeEntry entry, Action<PlayerPrefsRuntimeEntry> onEntryRemoved)
@@ -414,8 +326,7 @@ namespace DmytroUdovychenko.PlayerPrefsRuntimeTool
                 return;
             }
 
-            PlayerPrefs.DeleteKey(entry.Name);
-            PlayerPrefs.Save();
+            PlayerPrefsRuntimeWriter.DeleteKey(entry.Name);
 
             onEntryRemoved?.Invoke(entry);
             Close();
@@ -423,6 +334,15 @@ namespace DmytroUdovychenko.PlayerPrefsRuntimeTool
 
         private void ToggleEditMode()
         {
+            // Block entering edit mode for values too large for the legacy UI Text-backed
+            // InputField to render; the tail would be lost or the field would fail to draw.
+            // Such values are edited through Import or the public API instead.
+            if (!m_isEditMode && !PlayerPrefsRuntimeValueDisplay.IsEditableInline(m_currentEntry.Value, out string editBlockedMessage))
+            {
+                ShowError(editBlockedMessage);
+                return;
+            }
+
             m_isEditMode = !m_isEditMode;
 
             if (m_valueTextObject != null)
@@ -458,23 +378,26 @@ namespace DmytroUdovychenko.PlayerPrefsRuntimeTool
                 return;
             }
 
-            string newValue = m_valueInputField.text;
+            GameObject dialogRoot = m_dialogRoot;
+            InputField valueInputField = m_valueInputField;
+            string newValue = valueInputField.text;
             string key = m_currentEntry.Name;
+            string type = m_currentEntry.Type;
 
-            if (string.IsNullOrEmpty(key) || key == PlayerPrefsRuntimeViewConstants.UnnamedLabel)
+            if (string.IsNullOrEmpty(key))
             {
                 ShowError("Cannot save PlayerPref with empty key.");
                 return;
             }
 
-            switch (m_currentEntry.Type)
+            PlayerPrefsRuntimeEntry updatedEntry;
+            switch (type)
             {
                 case "Int32":
-                    if (int.TryParse(newValue, out int intValue))
+                    if (int.TryParse(newValue, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out int intValue))
                     {
-                        PlayerPrefs.SetInt(key, intValue);
-                        PlayerPrefs.Save();
-                        m_currentEntry = new PlayerPrefsRuntimeEntry(key, intValue);
+                        PlayerPrefsRuntimeWriter.SetInt(key, intValue);
+                        updatedEntry = new PlayerPrefsRuntimeEntry(key, intValue);
                     }
                     else
                     {
@@ -486,9 +409,8 @@ namespace DmytroUdovychenko.PlayerPrefsRuntimeTool
                 case "Single":
                     if (float.TryParse(newValue, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out float floatValue))
                     {
-                        PlayerPrefs.SetFloat(key, floatValue);
-                        PlayerPrefs.Save();
-                        m_currentEntry = new PlayerPrefsRuntimeEntry(key, floatValue);
+                        PlayerPrefsRuntimeWriter.SetFloat(key, floatValue);
+                        updatedEntry = new PlayerPrefsRuntimeEntry(key, floatValue);
                     }
                     else
                     {
@@ -498,28 +420,39 @@ namespace DmytroUdovychenko.PlayerPrefsRuntimeTool
                     break;
 
                 case "String":
-                    PlayerPrefs.SetString(key, newValue);
-                    PlayerPrefs.Save();
-                    m_currentEntry = new PlayerPrefsRuntimeEntry(key, newValue);
+                    PlayerPrefsRuntimeWriter.SetString(key, newValue);
+                    updatedEntry = new PlayerPrefsRuntimeEntry(key, newValue);
                     break;
 
                 default:
-                    ShowError($"Unsupported type: {m_currentEntry.Type}");
+                    ShowError($"Unsupported type: {type}");
                     return;
             }
 
+            // Writer notifications are synchronous and user handlers may close or rebuild the
+            // viewer. Do not touch stale Unity objects if that happened during the write.
+            if (m_dialogRoot == null
+                || !ReferenceEquals(m_dialogRoot, dialogRoot)
+                || m_valueInputField == null
+                || !ReferenceEquals(m_valueInputField, valueInputField))
+            {
+                return;
+            }
+
+            m_currentEntry = updatedEntry;
             if (m_valueTextObject != null)
             {
                 Text valueText = m_valueTextObject.GetComponent<Text>();
                 if (valueText != null)
                 {
-                    valueText.text = string.IsNullOrEmpty(newValue) ? PlayerPrefsRuntimeViewConstants.EmptyValueLabel : newValue;
+                    valueText.text = PlayerPrefsRuntimeValueDisplay.FormatForDisplay(m_currentEntry.Value);
                 }
             }
 
-            m_onEntryUpdated?.Invoke(m_currentEntry);
-
+            valueInputField.text = m_currentEntry.Value ?? string.Empty;
+            Action<PlayerPrefsRuntimeEntry> onEntryUpdated = m_onEntryUpdated;
             ToggleEditMode();
+            onEntryUpdated?.Invoke(m_currentEntry);
         }
 
         private void ShowError(string errorMessage)

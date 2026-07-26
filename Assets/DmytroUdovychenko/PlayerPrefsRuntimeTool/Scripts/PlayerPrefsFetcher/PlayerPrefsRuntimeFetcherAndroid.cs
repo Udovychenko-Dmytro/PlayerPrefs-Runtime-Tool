@@ -18,7 +18,9 @@ namespace DmytroUdovychenko.PlayerPrefsRuntimeTool
     /// Android implementation for retrieving PlayerPrefs at runtime.
     /// Accesses SharedPreferences using Unity's AndroidJavaObject interface.
     /// </summary>
-    public class PlayerPrefsRuntimeFetcherAndroid : IPlayerPrefsRuntimeFetcher
+    public class PlayerPrefsRuntimeFetcherAndroid :
+        IPlayerPrefsRuntimeFetcher,
+        IPlayerPrefsRuntimeFetcherWithStatus
     {
         /// <summary>
         /// Retrieves all PlayerPrefs from Android SharedPreferences.
@@ -26,8 +28,19 @@ namespace DmytroUdovychenko.PlayerPrefsRuntimeTool
         /// <returns>A dictionary containing all PlayerPrefs keys and values.</returns>
         public Dictionary<string, object> GetAllPlayerPrefs()
         {
-            Dictionary<string, object> prefs = new Dictionary<string, object>();
+            TryGetAllPlayerPrefs(out Dictionary<string, object> prefs);
+            return prefs;
+        }
 
+        bool IPlayerPrefsRuntimeFetcherWithStatus.TryGetAllPlayerPrefs(out Dictionary<string, object> prefs)
+        {
+            return TryGetAllPlayerPrefs(out prefs);
+        }
+
+        private static bool TryGetAllPlayerPrefs(out Dictionary<string, object> prefs)
+        {
+            prefs = new Dictionary<string, object>();
+            bool isComplete = true;
             try
             {
                 Debug.Log("[PlayerPrefsRuntime] Attempting to fetch PlayerPrefs on Android");
@@ -40,7 +53,7 @@ namespace DmytroUdovychenko.PlayerPrefsRuntimeTool
                         if (string.IsNullOrEmpty(bundleId))
                         {
                             Debug.LogError("[PlayerPrefsRuntime] Bundle ID is null or empty");
-                            return prefs;
+                            return false;
                         }
                         
                         Debug.Log($"[PlayerPrefsRuntime] Bundle ID (Package Name): {bundleId}");
@@ -53,7 +66,7 @@ namespace DmytroUdovychenko.PlayerPrefsRuntimeTool
                             if (playerPrefs == null)
                             {
                                 Debug.LogWarning("[PlayerPrefsRuntime] Failed to access SharedPreferences");
-                                return prefs;
+                                return false;
                             }
 
                             using (AndroidJavaObject allEntries = playerPrefs.Call<AndroidJavaObject>("getAll"))
@@ -61,7 +74,7 @@ namespace DmytroUdovychenko.PlayerPrefsRuntimeTool
                                 if (allEntries == null)
                                 {
                                     Debug.LogWarning("[PlayerPrefsRuntime] Failed to get all SharedPreferences entries");
-                                    return prefs;
+                                    return false;
                                 }
 
                                 using (AndroidJavaObject entrySet = allEntries.Call<AndroidJavaObject>("entrySet"))
@@ -69,14 +82,14 @@ namespace DmytroUdovychenko.PlayerPrefsRuntimeTool
                                     if (entrySet == null)
                                     {
                                         Debug.LogWarning("[PlayerPrefsRuntime] Failed to get SharedPreferences entry set");
-                                        return prefs;
+                                        return false;
                                     }
 
                                     AndroidJavaObject[] entries = entrySet.Call<AndroidJavaObject[]>("toArray");
                                     if (entries == null)
                                     {
                                         Debug.LogWarning("[PlayerPrefsRuntime] Failed to convert entry set to array");
-                                        return prefs;
+                                        return false;
                                     }
 
                                     foreach (AndroidJavaObject entry in entries)
@@ -85,22 +98,37 @@ namespace DmytroUdovychenko.PlayerPrefsRuntimeTool
                                         {
                                             if (entry == null)
                                             {
+                                                isComplete = false;
                                                 continue;
                                             }
 
                                             string key = entry.Call<string>("getKey");
                                             if (string.IsNullOrEmpty(key))
                                             {
+                                                isComplete = false;
                                                 continue;
                                             }
 
                                             string formattedKey = Uri.UnescapeDataString(key);
+                                            if (string.IsNullOrEmpty(formattedKey))
+                                            {
+                                                isComplete = false;
+                                                continue;
+                                            }
+
+                                            if (prefs.ContainsKey(formattedKey))
+                                            {
+                                                Debug.LogWarning($"[PlayerPrefsRuntime] Multiple Android keys decode to '{formattedKey}'. Last value retained.");
+                                                isComplete = false;
+                                            }
+
                                             using (AndroidJavaObject valueObject = entry.Call<AndroidJavaObject>("getValue"))
                                             {
 
                                                 if (valueObject == null)
                                                 {
                                                     prefs[formattedKey] = null;
+                                                    isComplete = false;
                                                     continue;
                                                 }
 
@@ -128,6 +156,7 @@ namespace DmytroUdovychenko.PlayerPrefsRuntimeTool
                                                             Debug.LogWarning($"[PlayerPrefsRuntime] Unsupported type for key: {key}, type: {valueType}");
                                                             string rawString = valueObject.Call<string>("toString");
                                                             prefs[formattedKey] = Uri.UnescapeDataString(rawString);
+                                                            isComplete = false;
                                                             break;
                                                     }
                                                 }
@@ -143,10 +172,11 @@ namespace DmytroUdovychenko.PlayerPrefsRuntimeTool
             catch (Exception e)
             {
                 Debug.LogError($"[PlayerPrefsRuntime] Error fetching PlayerPrefs on Android: {e.Message}\nStack Trace: {e.StackTrace}");
+                return false;
             }
 
             Debug.Log($"[PlayerPrefsRuntime] Successfully retrieved {prefs.Count} PlayerPrefs entries on Android");
-            return prefs;
+            return isComplete;
         }
     }
 }

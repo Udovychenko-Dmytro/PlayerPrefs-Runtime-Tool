@@ -23,7 +23,7 @@ namespace DmytroUdovychenko.PlayerPrefsRuntimeTool
             Font font,
             Color32 badgeColor)
         {
-            GameObject row = new GameObject(PlayerPrefsRuntimeViewConstants.RowName, typeof(RectTransform), typeof(LayoutElement), typeof(Image), typeof(HorizontalLayoutGroup));
+            GameObject row = new GameObject(PlayerPrefsRuntimeViewConstants.RowName, typeof(RectTransform), typeof(Image), typeof(HorizontalLayoutGroup));
             row.transform.SetParent(parent, false);
 
             Image rowImage;
@@ -101,15 +101,14 @@ namespace DmytroUdovychenko.PlayerPrefsRuntimeTool
             Image image = row.GetComponent<Image>();
             image.color = Color.clear;
 
-            LayoutElement layout = row.GetComponent<LayoutElement>();
-            layout.minHeight = PlayerPrefsRuntimeViewConstants.RowMinHeight;
-
+            // Row height is fixed and owned by the viewer (virtualized list): children are
+            // stretched to the available height and long text clips instead of growing the row.
             HorizontalLayoutGroup hlg = row.GetComponent<HorizontalLayoutGroup>();
             hlg.childAlignment = TextAnchor.MiddleCenter;
             hlg.childControlWidth = true;
             hlg.childForceExpandWidth = true;
             hlg.childControlHeight = true;
-            hlg.childForceExpandHeight = false;
+            hlg.childForceExpandHeight = true;
             hlg.spacing = PlayerPrefsRuntimeViewConstants.RowSpacing;
             hlg.padding = new RectOffset(PlayerPrefsRuntimeViewConstants.RowPaddingHorizontal, PlayerPrefsRuntimeViewConstants.RowPaddingHorizontal, PlayerPrefsRuntimeViewConstants.RowPaddingVertical, PlayerPrefsRuntimeViewConstants.RowPaddingVertical);
 
@@ -129,7 +128,7 @@ namespace DmytroUdovychenko.PlayerPrefsRuntimeTool
         {
             Text nameText = CreateText(PlayerPrefsRuntimeViewConstants.NameName, parent, PlayerPrefsRuntimeViewConstants.NameFontSize, FontStyle.Bold, Color.white, TextAnchor.MiddleLeft, font);
             nameText.horizontalOverflow = HorizontalWrapMode.Wrap;
-            nameText.verticalOverflow = VerticalWrapMode.Overflow;
+            nameText.verticalOverflow = VerticalWrapMode.Truncate;
 
             LayoutElement nameLayout = nameText.gameObject.AddComponent<LayoutElement>();
             nameLayout.flexibleWidth = PlayerPrefsRuntimeViewConstants.NameFlexibleWidth;
@@ -143,7 +142,7 @@ namespace DmytroUdovychenko.PlayerPrefsRuntimeTool
         {
             Text valueText = CreateText(PlayerPrefsRuntimeViewConstants.ValueName, parent, PlayerPrefsRuntimeViewConstants.ValueFontSize, FontStyle.Normal, PlayerPrefsRuntimeViewConstants.ValueTextColor, TextAnchor.MiddleRight, font);
             valueText.horizontalOverflow = HorizontalWrapMode.Wrap;
-            valueText.verticalOverflow = VerticalWrapMode.Overflow;
+            valueText.verticalOverflow = VerticalWrapMode.Truncate;
 
             LayoutElement valueLayout = valueText.gameObject.AddComponent<LayoutElement>();
             valueLayout.flexibleWidth = PlayerPrefsRuntimeViewConstants.ValueFlexibleWidth;

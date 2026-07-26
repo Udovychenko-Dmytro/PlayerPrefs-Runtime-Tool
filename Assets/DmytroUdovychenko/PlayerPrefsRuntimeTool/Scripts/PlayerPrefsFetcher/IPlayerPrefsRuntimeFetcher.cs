@@ -22,5 +22,16 @@ namespace DmytroUdovychenko.PlayerPrefsRuntimeTool
         /// <returns>A dictionary containing all PlayerPrefs keys and values.</returns>
         Dictionary<string, object> GetAllPlayerPrefs();
     }
+
+    /// <summary>
+    /// Internal capability implemented by built-in fetchers that can report whether
+    /// enumeration completed without dropping or transforming unknown entries.
+    /// Public reads may still use partial results, but destructive operations require
+    /// this stronger completeness guarantee.
+    /// </summary>
+    internal interface IPlayerPrefsRuntimeFetcherWithStatus
+    {
+        bool TryGetAllPlayerPrefs(out Dictionary<string, object> prefs);
+    }
 }
 #endif

@@ -10,10 +10,24 @@ namespace DmytroUdovychenko.PlayerPrefsRuntimeTool
     /// Windows editor implementation for retrieving PlayerPrefs directly from the registry.
     /// Mirrors the standalone Windows reader but targets the editor-specific registry hive.
     /// </summary>
-    public sealed class PlayerPrefsRuntimeFetcherWindowsEditor : IPlayerPrefsRuntimeFetcher
+    public sealed class PlayerPrefsRuntimeFetcherWindowsEditor :
+        IPlayerPrefsRuntimeFetcher,
+        IPlayerPrefsRuntimeFetcherWithStatus
     {
         public Dictionary<string, object> GetAllPlayerPrefs()
         {
+            TryGetAllPlayerPrefs(out Dictionary<string, object> prefs);
+            return prefs;
+        }
+
+        bool IPlayerPrefsRuntimeFetcherWithStatus.TryGetAllPlayerPrefs(out Dictionary<string, object> prefs)
+        {
+            return TryGetAllPlayerPrefs(out prefs);
+        }
+
+        private static bool TryGetAllPlayerPrefs(out Dictionary<string, object> prefs)
+        {
+            prefs = new Dictionary<string, object>(StringComparer.Ordinal);
             try
             {
                 string companyName = string.IsNullOrWhiteSpace(Application.companyName) ? "UnityDefaultCompany" : Application.companyName;
@@ -21,16 +35,15 @@ namespace DmytroUdovychenko.PlayerPrefsRuntimeTool
                 string registryPath = $@"Software\Unity\UnityEditor\{companyName}\{productName}";
 
                 Debug.Log($"[PlayerPrefsRuntime] Fetching Windows editor PlayerPrefs from registry path: {registryPath}");
-                Dictionary<string, object> prefs = PlayerPrefsRuntimeWindowsRegistryReader.ReadPlayerPrefs(registryPath);
+                bool isComplete = PlayerPrefsRuntimeWindowsRegistryReader.TryReadPlayerPrefs(registryPath, out prefs);
                 Debug.Log($"[PlayerPrefsRuntime] Retrieved {prefs.Count} PlayerPrefs entries from Windows editor registry.");
-                return prefs;
+                return isComplete;
             }
             catch (Exception e)
             {
                 Debug.LogError($"[PlayerPrefsRuntime] Error while reading Windows editor PlayerPrefs: {e.Message}\n{e.StackTrace}");
+                return false;
             }
-
-            return new Dictionary<string, object>(StringComparer.Ordinal);
         }
     }
 }

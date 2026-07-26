@@ -9,11 +9,7 @@
 #if PLAYER_PREFS_RUNTIME_TOOL
 using System;
 using UnityEngine;
-using UnityEngine.EventSystems;
 using UnityEngine.UI;
-#if ENABLE_INPUT_SYSTEM
-using UnityEngine.InputSystem.UI;
-#endif
 
 namespace DmytroUdovychenko.PlayerPrefsRuntimeTool
 {
@@ -22,36 +18,41 @@ namespace DmytroUdovychenko.PlayerPrefsRuntimeTool
     /// </summary>
     internal class PlayerPrefsRuntimeViewerBuilder
     {
-        private readonly Action<string> m_onSearchValueChanged;
-        private readonly Action m_onSortModeButtonClicked;
-        private readonly Action m_onClearSearchClicked;
-        private readonly Action m_onCloseButtonClicked;
+        private readonly PlayerPrefsRuntimeViewerCallbacks m_callbacks;
+        private readonly System.Collections.Generic.Dictionary<string, Button> m_typeFilterButtons = new System.Collections.Generic.Dictionary<string, Button>(StringComparer.Ordinal);
 
         private GameObject m_panelInstance;
         private RectTransform m_contentRoot;
+        private ScrollRect m_scrollRect;
+        private RectTransform m_viewportRect;
         private InputField m_searchInputField;
         private Text m_subtitleText;
         private Text m_sortModeLabel;
         private Font m_defaultFont;
+        private RectTransform m_headerRect;
+        private RectTransform m_separatorRect;
+        private RectTransform m_scrollAreaRect;
+        private GameObject m_actionBar;
+        private GameObject m_filterBar;
+        private Button m_toolsToggleButton;
+        private PlayerPrefsRuntimeCoroutineHost m_coroutineHost;
+        private bool m_toolsExpanded;
 
         public bool IsVisible => m_panelInstance != null;
 
         public RectTransform ContentRoot => m_contentRoot;
 
+        public ScrollRect ScrollView => m_scrollRect;
+
+        public RectTransform ViewportRect => m_viewportRect;
+
         public Transform PanelTransform => m_panelInstance != null ? m_panelInstance.transform : null;
 
         public Font DefaultFont => GetFont();
 
-        public PlayerPrefsRuntimeViewerBuilder(
-            Action onSortModeButtonClicked,
-            Action<string> onSearchValueChanged,
-            Action onClearSearchClicked,
-            Action onCloseButtonClicked)
+        public PlayerPrefsRuntimeViewerBuilder(PlayerPrefsRuntimeViewerCallbacks callbacks)
         {
-            m_onSortModeButtonClicked = onSortModeButtonClicked;
-            m_onSearchValueChanged = onSearchValueChanged;
-            m_onClearSearchClicked = onClearSearchClicked;
-            m_onCloseButtonClicked = onCloseButtonClicked;
+            m_callbacks = callbacks ?? new PlayerPrefsRuntimeViewerCallbacks();
         }
 
         public void EnsureVisible()
@@ -63,7 +64,7 @@ namespace DmytroUdovychenko.PlayerPrefsRuntimeTool
                 return;
             }
 
-            EnsureEventSystemExists();
+            PlayerPrefsRuntimeUiFactory.EnsureEventSystem();
             BuildViewerPanel();
         }
 
@@ -84,9 +85,19 @@ namespace DmytroUdovychenko.PlayerPrefsRuntimeTool
 
             m_panelInstance = null;
             m_contentRoot = null;
+            m_scrollRect = null;
+            m_viewportRect = null;
             m_searchInputField = null;
             m_subtitleText = null;
             m_sortModeLabel = null;
+            m_headerRect = null;
+            m_separatorRect = null;
+            m_scrollAreaRect = null;
+            m_actionBar = null;
+            m_filterBar = null;
+            m_toolsToggleButton = null;
+            m_coroutineHost = null;
+            m_typeFilterButtons.Clear();
         }
 
         public void SetSearchText(string text)
@@ -99,18 +110,18 @@ namespace DmytroUdovychenko.PlayerPrefsRuntimeTool
 
         public Coroutine StartCoroutine(System.Collections.IEnumerator routine)
         {
-            if (m_panelInstance == null)
+            if (m_coroutineHost == null)
                 return null;
 
-            return m_panelInstance.GetComponent<Image>().StartCoroutine(routine);
+            return m_coroutineHost.StartCoroutine(routine);
         }
 
         public void StopCoroutine(Coroutine routine)
         {
-            if (m_panelInstance == null || routine == null)
+            if (m_coroutineHost == null || routine == null)
                 return;
 
-            m_panelInstance.GetComponent<Image>().StopCoroutine(routine);
+            m_coroutineHost.StopCoroutine(routine);
         }
 
         public void UpdateSubtitleText(string text)
@@ -129,29 +140,70 @@ namespace DmytroUdovychenko.PlayerPrefsRuntimeTool
             m_sortModeLabel.text = text;
         }
 
+        /// <summary>
+        /// Shows or hides the action bar (Add / Delete All / Export / Import) and the type filter
+        /// bar, resizing the header and the scroll area so the hidden rows do not waste screen space.
+        /// </summary>
+        public void SetToolsExpanded(bool expanded)
+        {
+            m_toolsExpanded = expanded;
+            ApplyToolsExpandedState();
+        }
+
+        private void ApplyToolsExpandedState()
+        {
+            if (m_actionBar != null)
+            {
+                m_actionBar.SetActive(m_toolsExpanded);
+            }
+
+            if (m_filterBar != null)
+            {
+                m_filterBar.SetActive(m_toolsExpanded);
+            }
+
+            float headerHeight = m_toolsExpanded
+                ? PlayerPrefsRuntimeViewConstants.HeaderHeightExpanded
+                : PlayerPrefsRuntimeViewConstants.HeaderHeightCollapsed;
+
+            if (m_headerRect != null)
+            {
+                m_headerRect.sizeDelta = new Vector2(m_headerRect.sizeDelta.x, headerHeight);
+            }
+
+            if (m_separatorRect != null)
+            {
+                m_separatorRect.anchoredPosition = new Vector2(m_separatorRect.anchoredPosition.x, -headerHeight);
+            }
+
+            if (m_scrollAreaRect != null)
+            {
+                m_scrollAreaRect.offsetMax = new Vector2(
+                    m_scrollAreaRect.offsetMax.x,
+                    -(headerHeight + PlayerPrefsRuntimeViewConstants.ScrollAreaTopGap));
+            }
+
+            ApplyToggleColors(m_toolsToggleButton, m_toolsExpanded);
+        }
+
+        // Every call builds a brand-new Canvas: Destroy() tears the previous one down, and an
+        // externally destroyed Canvas may still linger until the end of the frame, so nothing here
+        // ever looks for or reuses existing objects.
         private void BuildViewerPanel()
         {
-            GameObject canvasGo = EnsureCanvas();
-            EnsureBackdrop(canvasGo.transform);
+            GameObject canvasGo = CreateCanvas();
+            CreateBackdrop(canvasGo.transform);
 
-            Transform existingPanel = canvasGo.transform.Find(PlayerPrefsRuntimeViewConstants.PanelName);
-            if (existingPanel != null)
-            {
-                m_panelInstance = existingPanel.gameObject;
-                ApplySafeArea(existingPanel.GetComponent<RectTransform>());
-                CacheExistingReferences(existingPanel);
-                return;
-            }
-
-            Transform legacyScroll = canvasGo.transform.Find(PlayerPrefsRuntimeViewConstants.ScrollViewName);
-            if (legacyScroll != null)
-            {
-                UnityEngine.Object.Destroy(legacyScroll.gameObject);
-            }
-
-            GameObject panel = new GameObject(PlayerPrefsRuntimeViewConstants.PanelName, typeof(RectTransform), typeof(Image), typeof(Outline));
+            GameObject panel = new GameObject(
+                PlayerPrefsRuntimeViewConstants.PanelName,
+                typeof(RectTransform),
+                typeof(Image),
+                typeof(Outline),
+                typeof(PlayerPrefsRuntimeCoroutineHost));
             panel.transform.SetParent(canvasGo.transform, false);
             panel.transform.SetAsLastSibling();
+
+            m_coroutineHost = panel.GetComponent<PlayerPrefsRuntimeCoroutineHost>();
 
             RectTransform panelRT = panel.GetComponent<RectTransform>();
             panelRT.anchorMin = new Vector2(PlayerPrefsRuntimeViewConstants.PanelAnchorMinX, PlayerPrefsRuntimeViewConstants.PanelAnchorMinY);
@@ -166,108 +218,23 @@ namespace DmytroUdovychenko.PlayerPrefsRuntimeTool
 
             Outline outline = panel.GetComponent<Outline>();
             outline.effectColor = PlayerPrefsRuntimeViewConstants.OutlineEffectColor;
-            outline.effectDistance = new Vector2(4f, -4f);
+            outline.effectDistance = new Vector2(PlayerPrefsRuntimeViewConstants.PanelOutlineDistance, -PlayerPrefsRuntimeViewConstants.PanelOutlineDistance);
 
             CreateHeader(panel.transform);
             CreateScrollArea(panel.transform);
+            ApplyToolsExpandedState();
 
             m_panelInstance = panel;
         }
 
-        private void CacheExistingReferences(Transform panel)
-        {
-            if (panel == null)
-                return;
-
-            Transform header = panel.Find(PlayerPrefsRuntimeViewConstants.HeaderName);
-            if (header != null)
-            {
-                Text subtitle = header.Find(PlayerPrefsRuntimeViewConstants.SubtitleName)?.GetComponent<Text>();
-                if (subtitle != null)
-                {
-                    m_subtitleText = subtitle;
-                }
-
-                Text sortLabel = FindSortModeButtonLabel(header);
-                if (sortLabel != null)
-                {
-                    m_sortModeLabel = sortLabel;
-                }
-
-                InputField searchField = FindSearchInputField(header);
-                if (searchField != null)
-                {
-                    m_searchInputField = searchField;
-                }
-            }
-
-            Transform scrollView = panel.Find(PlayerPrefsRuntimeViewConstants.ScrollViewName);
-            if (scrollView == null)
-                return;
-
-            Transform viewport = scrollView.Find(PlayerPrefsRuntimeViewConstants.ViewportName);
-            if (viewport == null)
-                return;
-
-            RectTransform content = viewport.Find(PlayerPrefsRuntimeViewConstants.ContentName) as RectTransform;
-            if (content != null)
-            {
-                m_contentRoot = content;
-            }
-        }
-
-        private Text FindSortModeButtonLabel(Transform root)
-        {
-            if (root == null)
-                return null;
-
-            Transform[] transforms = root.GetComponentsInChildren<Transform>(true);
-            for (int i = 0; i < transforms.Length; i++)
-            {
-                Transform current = transforms[i];
-                if (!string.Equals(current.name, PlayerPrefsRuntimeViewConstants.SortModeButtonName, StringComparison.Ordinal))
-                {
-                    continue;
-                }
-
-                Transform labelTransform = current.Find(PlayerPrefsRuntimeViewConstants.LabelName);
-                if (labelTransform != null)
-                {
-                    return labelTransform.GetComponent<Text>();
-                }
-            }
-
-            return null;
-        }
-
-        private InputField FindSearchInputField(Transform root)
-        {
-            if (root == null)
-                return null;
-
-            Transform[] transforms = root.GetComponentsInChildren<Transform>(true);
-            for (int i = 0; i < transforms.Length; i++)
-            {
-                Transform current = transforms[i];
-                if (!string.Equals(current.name, PlayerPrefsRuntimeViewConstants.SearchFieldName, StringComparison.Ordinal))
-                {
-                    continue;
-                }
-
-                return current.GetComponent<InputField>();
-            }
-
-            return null;
-        }
-
-        private GameObject EnsureCanvas()
+        private GameObject CreateCanvas()
         {
             GameObject canvasGo = new GameObject(PlayerPrefsRuntimeViewConstants.ViewerCanvasName, typeof(Canvas), typeof(CanvasScaler), typeof(GraphicRaycaster));
             Canvas canvas = canvasGo.GetComponent<Canvas>();
             canvas.renderMode = RenderMode.ScreenSpaceOverlay;
             CanvasScaler scaler = canvasGo.GetComponent<CanvasScaler>();
             scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
-            scaler.referenceResolution = new Vector2(1920, 1080);
+            scaler.referenceResolution = new Vector2(PlayerPrefsRuntimeViewConstants.CanvasReferenceWidth, PlayerPrefsRuntimeViewConstants.CanvasReferenceHeight);
             scaler.screenMatchMode = CanvasScaler.ScreenMatchMode.MatchWidthOrHeight;
             scaler.matchWidthOrHeight = PlayerPrefsRuntimeViewConstants.CanvasMatchWidthOrHeight;
 
@@ -280,15 +247,8 @@ namespace DmytroUdovychenko.PlayerPrefsRuntimeTool
             return canvasGo;
         }
 
-        private void EnsureBackdrop(Transform canvasTransform)
+        private void CreateBackdrop(Transform canvasTransform)
         {
-            Transform existing = canvasTransform.Find(PlayerPrefsRuntimeViewConstants.BackdropName);
-            if (existing != null)
-            {
-                existing.SetAsFirstSibling();
-                return;
-            }
-
             GameObject backdrop = new GameObject(PlayerPrefsRuntimeViewConstants.BackdropName, typeof(RectTransform), typeof(Image));
             backdrop.transform.SetParent(canvasTransform, false);
             backdrop.transform.SetAsFirstSibling();
@@ -340,25 +300,16 @@ namespace DmytroUdovychenko.PlayerPrefsRuntimeTool
 
         private void CreateHeader(Transform panel)
         {
-            Transform existingHeader = panel.Find(PlayerPrefsRuntimeViewConstants.HeaderName);
-            if (existingHeader != null)
-            {
-                Transform controlsRoot = GetHeaderControlsRoot(existingHeader);
-                CreateSortModeButton(controlsRoot);
-                CreateSearchField(controlsRoot);
-                CreateCloseButton(controlsRoot);
-                ConfigureHeaderTextLayout(existingHeader);
-                return;
-            }
-
             GameObject header = new GameObject(PlayerPrefsRuntimeViewConstants.HeaderName, typeof(RectTransform), typeof(Image));
             header.transform.SetParent(panel, false);
             RectTransform headerRT = header.GetComponent<RectTransform>();
             headerRT.anchorMin = new Vector2(0, 1);
             headerRT.anchorMax = new Vector2(1, 1);
             headerRT.pivot = new Vector2(0.5f, 1f);
-            headerRT.sizeDelta = new Vector2(0, 160);
+            headerRT.sizeDelta = new Vector2(0, PlayerPrefsRuntimeViewConstants.HeaderHeightExpanded);
             headerRT.anchoredPosition = Vector2.zero;
+
+            m_headerRect = headerRT;
 
             Image headerImage = header.GetComponent<Image>();
             headerImage.color = PlayerPrefsRuntimeViewConstants.HeaderColor;
@@ -366,15 +317,18 @@ namespace DmytroUdovychenko.PlayerPrefsRuntimeTool
             GameObject topBar = new GameObject(PlayerPrefsRuntimeViewConstants.TopBarName, typeof(RectTransform));
             topBar.transform.SetParent(header.transform, false);
             RectTransform topBarRT = topBar.GetComponent<RectTransform>();
-            topBarRT.anchorMin = new Vector2(0, 0.55f);
-            topBarRT.anchorMax = new Vector2(1, 1);
+            topBarRT.anchorMin = new Vector2(0f, 1f);
+            topBarRT.anchorMax = new Vector2(1f, 1f);
             topBarRT.pivot = new Vector2(0.5f, 1f);
-            topBarRT.offsetMin = new Vector2(30f, 0f);
-            topBarRT.offsetMax = new Vector2(-20f, -15f);
+            topBarRT.offsetMin = new Vector2(PlayerPrefsRuntimeViewConstants.HeaderBarLeftInset, -(PlayerPrefsRuntimeViewConstants.HeaderTopOffset + PlayerPrefsRuntimeViewConstants.ToolbarRowHeight));
+            topBarRT.offsetMax = new Vector2(-PlayerPrefsRuntimeViewConstants.HeaderBarRightInset, -PlayerPrefsRuntimeViewConstants.HeaderTopOffset);
 
             CreateSortModeButton(topBar.transform);
             CreateSearchField(topBar.transform);
             CreateCloseButton(topBar.transform);
+            CreateToolsToggleButton(topBar.transform);
+            CreateActionBar(header.transform);
+            CreateFilterBar(header.transform);
 
             Text titleText = CreateText(PlayerPrefsRuntimeViewConstants.TitleName, header.transform, PlayerPrefsRuntimeViewConstants.ViewerTitleFontSize, FontStyle.Bold, Color.white, TextAnchor.MiddleRight, true, out _);
             if (titleText != null)
@@ -396,27 +350,220 @@ namespace DmytroUdovychenko.PlayerPrefsRuntimeTool
             accentRT.anchorMin = new Vector2(0, 0);
             accentRT.anchorMax = new Vector2(1, 0);
             accentRT.pivot = new Vector2(0.5f, 0);
-            accentRT.sizeDelta = new Vector2(0, 6f);
-            accentRT.anchoredPosition = new Vector2(0, -3f);
+            accentRT.sizeDelta = new Vector2(0f, PlayerPrefsRuntimeViewConstants.AccentBarHeight);
+            accentRT.anchoredPosition = new Vector2(0f, -PlayerPrefsRuntimeViewConstants.AccentBarHeight * 0.5f);
             accent.GetComponent<Image>().color = PlayerPrefsRuntimeViewConstants.AccentColor;
         }
 
-        private Transform GetHeaderControlsRoot(Transform header)
+        private void CreateActionBar(Transform header)
         {
             if (header == null)
-                return null;
+            {
+                Debug.LogWarning("[PlayerPrefsRuntime] Header transform is null for action bar");
+                return;
+            }
 
-            Transform topBar = header.Find(PlayerPrefsRuntimeViewConstants.TopBarName);
-            if (topBar != null)
-                return topBar;
+            GameObject actionBar = new GameObject(PlayerPrefsRuntimeViewConstants.ActionBarName, typeof(RectTransform), typeof(HorizontalLayoutGroup));
+            actionBar.transform.SetParent(header, false);
+            m_actionBar = actionBar;
 
-            return header;
+            RectTransform actionBarRT = actionBar.GetComponent<RectTransform>();
+            actionBarRT.anchorMin = new Vector2(0f, 1f);
+            actionBarRT.anchorMax = new Vector2(1f, 1f);
+            actionBarRT.pivot = new Vector2(0.5f, 1f);
+            actionBarRT.offsetMin = new Vector2(PlayerPrefsRuntimeViewConstants.HeaderBarLeftInset, -(PlayerPrefsRuntimeViewConstants.ActionBarTopOffset + PlayerPrefsRuntimeViewConstants.ActionBarHeight));
+            actionBarRT.offsetMax = new Vector2(-PlayerPrefsRuntimeViewConstants.HeaderBarRightInset, -PlayerPrefsRuntimeViewConstants.ActionBarTopOffset);
+
+            HorizontalLayoutGroup layoutGroup = actionBar.GetComponent<HorizontalLayoutGroup>();
+            layoutGroup.spacing = PlayerPrefsRuntimeViewConstants.ActionBarSpacing;
+            layoutGroup.childAlignment = TextAnchor.MiddleCenter;
+            layoutGroup.childControlWidth = true;
+            layoutGroup.childControlHeight = true;
+            layoutGroup.childForceExpandWidth = true;
+            layoutGroup.childForceExpandHeight = true;
+
+            CreateToolbarButton(PlayerPrefsRuntimeViewConstants.AddButtonName, actionBar.transform, PlayerPrefsRuntimeViewConstants.AddButtonLabel, HandleAddClicked, false);
+            CreateToolbarButton(PlayerPrefsRuntimeViewConstants.DeleteAllButtonName, actionBar.transform, PlayerPrefsRuntimeViewConstants.DeleteAllButtonLabel, HandleDeleteAllClicked, true);
+            CreateToolbarButton(PlayerPrefsRuntimeViewConstants.ExportButtonName, actionBar.transform, PlayerPrefsRuntimeViewConstants.ExportButtonLabel, HandleExportClicked, false);
+            CreateToolbarButton(PlayerPrefsRuntimeViewConstants.ImportButtonName, actionBar.transform, PlayerPrefsRuntimeViewConstants.ImportButtonLabel, HandleImportClicked, false);
+        }
+
+        private void CreateToolbarButton(string name, Transform parent, string label, UnityEngine.Events.UnityAction onClick, bool danger)
+        {
+            GameObject buttonGo = new GameObject(name, typeof(RectTransform), typeof(Image), typeof(Button), typeof(LayoutElement));
+            buttonGo.transform.SetParent(parent, false);
+
+            Image buttonImage = buttonGo.GetComponent<Image>();
+            buttonImage.color = PlayerPrefsRuntimeViewConstants.ControlNormalColor;
+
+            Outline outline = buttonGo.AddComponent<Outline>();
+            outline.effectColor = PlayerPrefsRuntimeViewConstants.OutlineEffectColor;
+            outline.effectDistance = new Vector2(PlayerPrefsRuntimeViewConstants.ControlOutlineDistance, -PlayerPrefsRuntimeViewConstants.ControlOutlineDistance);
+
+            Button button = buttonGo.GetComponent<Button>();
+            button.targetGraphic = buttonImage;
+            button.onClick.AddListener(onClick);
+
+            ColorBlock colors = button.colors;
+            colors.normalColor = PlayerPrefsRuntimeViewConstants.ControlNormalColor;
+            colors.highlightedColor = PlayerPrefsRuntimeViewConstants.ControlHighlightedColor;
+            colors.pressedColor = PlayerPrefsRuntimeViewConstants.ControlPressedColor;
+            colors.fadeDuration = PlayerPrefsRuntimeViewConstants.ControlFadeDuration;
+            button.colors = colors;
+
+            if (danger)
+            {
+                PlayerPrefsRuntimeUiFactory.ApplyDangerColors(button);
+            }
+
+            LayoutElement layout = buttonGo.GetComponent<LayoutElement>();
+            layout.flexibleWidth = 1f;
+            layout.minWidth = 0f;
+
+            Text labelText = CreateText(PlayerPrefsRuntimeViewConstants.LabelName, buttonGo.transform, PlayerPrefsRuntimeViewConstants.ActionBarButtonFontSize, FontStyle.Bold, Color.white, TextAnchor.MiddleCenter, false, out _);
+            if (labelText != null)
+            {
+                labelText.text = label;
+            }
+        }
+
+        private void CreateFilterBar(Transform header)
+        {
+            if (header == null)
+            {
+                Debug.LogWarning("[PlayerPrefsRuntime] Header transform is null for filter bar");
+                return;
+            }
+
+            GameObject filterBar = new GameObject(PlayerPrefsRuntimeViewConstants.FilterBarName, typeof(RectTransform), typeof(HorizontalLayoutGroup));
+            filterBar.transform.SetParent(header, false);
+            m_filterBar = filterBar;
+
+            RectTransform filterBarRT = filterBar.GetComponent<RectTransform>();
+            filterBarRT.anchorMin = new Vector2(0f, 1f);
+            filterBarRT.anchorMax = new Vector2(1f, 1f);
+            filterBarRT.pivot = new Vector2(0.5f, 1f);
+            filterBarRT.offsetMin = new Vector2(PlayerPrefsRuntimeViewConstants.HeaderBarLeftInset, -(PlayerPrefsRuntimeViewConstants.FilterBarTopOffset + PlayerPrefsRuntimeViewConstants.FilterBarHeight));
+            filterBarRT.offsetMax = new Vector2(-PlayerPrefsRuntimeViewConstants.HeaderBarRightInset, -PlayerPrefsRuntimeViewConstants.FilterBarTopOffset);
+
+            HorizontalLayoutGroup layoutGroup = filterBar.GetComponent<HorizontalLayoutGroup>();
+            layoutGroup.spacing = PlayerPrefsRuntimeViewConstants.ActionBarSpacing;
+            layoutGroup.childAlignment = TextAnchor.MiddleLeft;
+            layoutGroup.childControlWidth = true;
+            layoutGroup.childControlHeight = true;
+            layoutGroup.childForceExpandWidth = true;
+            layoutGroup.childForceExpandHeight = true;
+
+            Text filterLabel = CreateText(PlayerPrefsRuntimeViewConstants.LabelName, filterBar.transform, PlayerPrefsRuntimeViewConstants.FilterChipFontSize, FontStyle.Bold, PlayerPrefsRuntimeViewConstants.ValueTextColor, TextAnchor.MiddleLeft, false, out GameObject filterLabelGo);
+            if (filterLabel != null)
+            {
+                filterLabel.text = PlayerPrefsRuntimeViewConstants.FilterBarLabelText;
+            }
+
+            if (filterLabelGo != null)
+            {
+                LayoutElement labelLayout = filterLabelGo.AddComponent<LayoutElement>();
+                labelLayout.preferredWidth = PlayerPrefsRuntimeViewConstants.FilterBarLabelWidth;
+                labelLayout.flexibleWidth = 0f;
+            }
+
+            CreateTypeFilterChip("Int32", PlayerPrefsRuntimeViewConstants.TypeIntLabel, filterBar.transform);
+            CreateTypeFilterChip("Single", PlayerPrefsRuntimeViewConstants.TypeFloatLabel, filterBar.transform);
+            CreateTypeFilterChip("String", PlayerPrefsRuntimeViewConstants.TypeStringLabel, filterBar.transform);
+        }
+
+        private void CreateTypeFilterChip(string typeName, string label, Transform parent)
+        {
+            GameObject chipGo = new GameObject(typeName, typeof(RectTransform), typeof(Image), typeof(Button), typeof(LayoutElement));
+            chipGo.transform.SetParent(parent, false);
+
+            Image chipImage = chipGo.GetComponent<Image>();
+            chipImage.color = PlayerPrefsRuntimeViewConstants.ControlNormalColor;
+
+            Outline outline = chipGo.AddComponent<Outline>();
+            outline.effectColor = PlayerPrefsRuntimeViewConstants.OutlineEffectColor;
+            outline.effectDistance = new Vector2(PlayerPrefsRuntimeViewConstants.ControlOutlineDistance, -PlayerPrefsRuntimeViewConstants.ControlOutlineDistance);
+
+            Button chipButton = chipGo.GetComponent<Button>();
+            chipButton.targetGraphic = chipImage;
+            chipButton.onClick.AddListener(() => m_callbacks.OnTypeFilterToggled?.Invoke(typeName));
+
+            ColorBlock colors = chipButton.colors;
+            colors.normalColor = PlayerPrefsRuntimeViewConstants.ControlNormalColor;
+            colors.highlightedColor = PlayerPrefsRuntimeViewConstants.ControlHighlightedColor;
+            colors.pressedColor = PlayerPrefsRuntimeViewConstants.ControlPressedColor;
+            colors.fadeDuration = PlayerPrefsRuntimeViewConstants.ControlFadeDuration;
+            chipButton.colors = colors;
+
+            LayoutElement layout = chipGo.GetComponent<LayoutElement>();
+            layout.flexibleWidth = 1f;
+            layout.minWidth = 0f;
+
+            Text labelText = CreateText(PlayerPrefsRuntimeViewConstants.LabelName, chipGo.transform, PlayerPrefsRuntimeViewConstants.FilterChipFontSize, FontStyle.Bold, Color.white, TextAnchor.MiddleCenter, false, out _);
+            if (labelText != null)
+            {
+                labelText.text = label;
+            }
+
+            m_typeFilterButtons[typeName] = chipButton;
+        }
+
+        public void SetTypeFilterActive(string typeName, bool active)
+        {
+            if (!m_typeFilterButtons.TryGetValue(typeName, out Button chipButton))
+            {
+                return;
+            }
+
+            ApplyToggleColors(chipButton, active);
+        }
+
+        /// <summary>
+        /// Paints a toggle-style button (type filter chip, tools toggle) in its on/off colors.
+        /// </summary>
+        private static void ApplyToggleColors(Button button, bool active)
+        {
+            if (button == null)
+            {
+                return;
+            }
+
+            Image buttonImage = button.targetGraphic as Image;
+            if (buttonImage != null)
+            {
+                buttonImage.color = active ? PlayerPrefsRuntimeViewConstants.AccentColor : PlayerPrefsRuntimeViewConstants.ControlNormalColor;
+            }
+
+            ColorBlock colors = button.colors;
+            colors.normalColor = active ? PlayerPrefsRuntimeViewConstants.AccentColor : PlayerPrefsRuntimeViewConstants.ControlNormalColor;
+            colors.highlightedColor = active ? PlayerPrefsRuntimeViewConstants.AccentColor : PlayerPrefsRuntimeViewConstants.ControlHighlightedColor;
+            colors.pressedColor = active ? PlayerPrefsRuntimeViewConstants.AccentColor : PlayerPrefsRuntimeViewConstants.ControlPressedColor;
+            button.colors = colors;
+
+            Transform labelTransform = button.transform.Find(PlayerPrefsRuntimeViewConstants.LabelName);
+            Text labelText = labelTransform != null ? labelTransform.GetComponent<Text>() : null;
+            if (labelText != null)
+            {
+                labelText.color = active ? PlayerPrefsRuntimeViewConstants.BadgeLabelColor : Color.white;
+            }
         }
 
         private void ConfigureHeaderTextLayout(Transform header)
         {
             ConfigureTitleLayout(header.Find(PlayerPrefsRuntimeViewConstants.TitleName)?.GetComponent<Text>());
             ConfigureSubtitleLayout(header.Find(PlayerPrefsRuntimeViewConstants.SubtitleName)?.GetComponent<Text>());
+        }
+
+        /// <summary>
+        /// Lets a header label shrink to fit its band instead of wrapping past it. The title and the
+        /// subtitle sit side by side in one row, so an unshrunk long string (the tool name on a narrow
+        /// window, or a long status message) would otherwise be drawn over its neighbour.
+        /// </summary>
+        private static void ApplyHeaderTextBestFit(Text text, int maxFontSize)
+        {
+            text.resizeTextForBestFit = true;
+            text.resizeTextMinSize = PlayerPrefsRuntimeViewConstants.HeaderTextResizeMinSize;
+            text.resizeTextMaxSize = maxFontSize;
         }
 
         private void ConfigureTitleLayout(Text titleText)
@@ -426,10 +573,11 @@ namespace DmytroUdovychenko.PlayerPrefsRuntimeTool
 
             RectTransform titleRT = titleText.rectTransform;
             titleText.alignment = TextAnchor.MiddleRight;
-            titleRT.anchorMin = new Vector2(0.45f, 0.05f);
-            titleRT.anchorMax = new Vector2(1f, 0.45f);
-            titleRT.offsetMin = new Vector2(20f, 0f);
-            titleRT.offsetMax = new Vector2(-30f, 0f);
+            ApplyHeaderTextBestFit(titleText, PlayerPrefsRuntimeViewConstants.ViewerTitleFontSize);
+            titleRT.anchorMin = new Vector2(PlayerPrefsRuntimeViewConstants.HeaderTitleAnchorMinX, 0f);
+            titleRT.anchorMax = new Vector2(1f, 0f);
+            titleRT.offsetMin = new Vector2(PlayerPrefsRuntimeViewConstants.HeaderTextInnerInset, PlayerPrefsRuntimeViewConstants.HeaderTextBottomMargin);
+            titleRT.offsetMax = new Vector2(-PlayerPrefsRuntimeViewConstants.HeaderTextOuterInset, PlayerPrefsRuntimeViewConstants.HeaderTextRowHeight);
         }
 
         private void ConfigureSubtitleLayout(Text subtitleText)
@@ -439,17 +587,15 @@ namespace DmytroUdovychenko.PlayerPrefsRuntimeTool
 
             RectTransform subtitleRT = subtitleText.rectTransform;
             subtitleText.alignment = TextAnchor.MiddleLeft;
-            subtitleRT.anchorMin = new Vector2(0f, 0.05f);
-            subtitleRT.anchorMax = new Vector2(0.55f, 0.45f);
-            subtitleRT.offsetMin = new Vector2(30f, 0f);
-            subtitleRT.offsetMax = new Vector2(-20f, 0f);
+            ApplyHeaderTextBestFit(subtitleText, PlayerPrefsRuntimeViewConstants.ViewerSubtitleFontSize);
+            subtitleRT.anchorMin = new Vector2(0f, 0f);
+            subtitleRT.anchorMax = new Vector2(PlayerPrefsRuntimeViewConstants.HeaderSubtitleAnchorMaxX, 0f);
+            subtitleRT.offsetMin = new Vector2(PlayerPrefsRuntimeViewConstants.HeaderTextOuterInset, PlayerPrefsRuntimeViewConstants.HeaderTextBottomMargin);
+            subtitleRT.offsetMax = new Vector2(-PlayerPrefsRuntimeViewConstants.HeaderTextInnerInset, PlayerPrefsRuntimeViewConstants.HeaderTextRowHeight);
         }
 
         private void CreateScrollArea(Transform panel)
         {
-            if (panel.Find(PlayerPrefsRuntimeViewConstants.ScrollViewName) != null)
-                return;
-
             GameObject separator = new GameObject(PlayerPrefsRuntimeViewConstants.SeparatorName, typeof(RectTransform), typeof(Image));
             separator.transform.SetParent(panel, false);
 
@@ -457,8 +603,10 @@ namespace DmytroUdovychenko.PlayerPrefsRuntimeTool
             separatorRT.anchorMin = new Vector2(0, 1);
             separatorRT.anchorMax = new Vector2(1, 1);
             separatorRT.pivot = new Vector2(0.5f, 1f);
-            separatorRT.sizeDelta = new Vector2(0, 2f);
-            separatorRT.anchoredPosition = new Vector2(0, -160);
+            separatorRT.sizeDelta = new Vector2(0f, PlayerPrefsRuntimeViewConstants.SeparatorHeight);
+            separatorRT.anchoredPosition = new Vector2(0, -PlayerPrefsRuntimeViewConstants.HeaderHeightExpanded);
+
+            m_separatorRect = separatorRT;
 
             Image separatorImage = separator.GetComponent<Image>();
             separatorImage.color = PlayerPrefsRuntimeViewConstants.SeparatorColor;
@@ -469,9 +617,11 @@ namespace DmytroUdovychenko.PlayerPrefsRuntimeTool
             RectTransform scrollRT = scrollGo.GetComponent<RectTransform>();
             scrollRT.anchorMin = new Vector2(0, 0);
             scrollRT.anchorMax = new Vector2(1, 1);
-            scrollRT.offsetMin = new Vector2(20, 20);
-            scrollRT.offsetMax = new Vector2(-20, -170);
+            scrollRT.offsetMin = new Vector2(PlayerPrefsRuntimeViewConstants.ScrollAreaSideInset, PlayerPrefsRuntimeViewConstants.ScrollAreaBottomInset);
+            scrollRT.offsetMax = new Vector2(-PlayerPrefsRuntimeViewConstants.ScrollAreaSideInset, -(PlayerPrefsRuntimeViewConstants.HeaderHeightExpanded + PlayerPrefsRuntimeViewConstants.ScrollAreaTopGap));
             scrollRT.pivot = new Vector2(0.5f, 0.5f);
+
+            m_scrollAreaRect = scrollRT;
 
             Image scrollBg = scrollGo.GetComponent<Image>();
             scrollBg.color = PlayerPrefsRuntimeViewConstants.ScrollBackgroundColor;
@@ -485,13 +635,17 @@ namespace DmytroUdovychenko.PlayerPrefsRuntimeTool
             viewportRT.offsetMin = Vector2.zero;
             viewportRT.offsetMax = Vector2.zero;
 
+            m_viewportRect = viewportRT;
+
             Image viewportImage = viewportGo.GetComponent<Image>();
             viewportImage.color = PlayerPrefsRuntimeViewConstants.ViewportBackgroundColor;
 
             Mask viewportMask = viewportGo.GetComponent<Mask>();
             viewportMask.showMaskGraphic = false;
 
-            GameObject contentGo = new GameObject(PlayerPrefsRuntimeViewConstants.ContentName, typeof(RectTransform), typeof(VerticalLayoutGroup), typeof(ContentSizeFitter));
+            // Content is a bare RectTransform: rows are positioned absolutely and the
+            // content height is set manually by the viewer (virtualized list).
+            GameObject contentGo = new GameObject(PlayerPrefsRuntimeViewConstants.ContentName, typeof(RectTransform));
             contentGo.transform.SetParent(viewportGo.transform, false);
 
             RectTransform contentRT = contentGo.GetComponent<RectTransform>();
@@ -503,21 +657,6 @@ namespace DmytroUdovychenko.PlayerPrefsRuntimeTool
 
             m_contentRoot = contentRT;
 
-            VerticalLayoutGroup vlg = contentGo.GetComponent<VerticalLayoutGroup>();
-            if (vlg != null)
-            {
-                vlg.childControlHeight = true;
-                vlg.childForceExpandHeight = false;
-                vlg.childControlWidth = true;
-                vlg.childForceExpandWidth = true;
-                vlg.spacing = 6f;
-                vlg.padding = new RectOffset(12, 12, 12, 12);
-            }
-
-            ContentSizeFitter fitter = contentGo.GetComponent<ContentSizeFitter>();
-            fitter.verticalFit = ContentSizeFitter.FitMode.PreferredSize;
-            fitter.horizontalFit = ContentSizeFitter.FitMode.Unconstrained;
-
             ScrollRect scroll = scrollGo.GetComponent<ScrollRect>();
             scroll.viewport = viewportRT;
             scroll.content = contentRT;
@@ -527,6 +666,19 @@ namespace DmytroUdovychenko.PlayerPrefsRuntimeTool
             scroll.scrollSensitivity = PlayerPrefsRuntimeViewConstants.ScrollSensitivity;
             scroll.inertia = true;
             scroll.decelerationRate = PlayerPrefsRuntimeViewConstants.ScrollDecelerationRate;
+            scroll.onValueChanged.AddListener(HandleScrollValueChanged);
+
+            m_scrollRect = scroll;
+        }
+
+        public void SetContentHeight(float height)
+        {
+            if (m_contentRoot == null)
+            {
+                return;
+            }
+
+            m_contentRoot.sizeDelta = new Vector2(m_contentRoot.sizeDelta.x, height);
         }
 
         private void CreateSortModeButton(Transform header)
@@ -534,20 +686,6 @@ namespace DmytroUdovychenko.PlayerPrefsRuntimeTool
             if (header == null)
             {
                 Debug.LogWarning("[PlayerPrefsRuntime] Header transform is null for sort mode button");
-                return;
-            }
-
-            Transform existingButton = header.Find(PlayerPrefsRuntimeViewConstants.SortModeButtonName);
-            if (existingButton != null)
-            {
-                if (m_sortModeLabel == null)
-                {
-                    Transform labelTransform = existingButton.Find(PlayerPrefsRuntimeViewConstants.LabelName);
-                    if (labelTransform != null)
-                    {
-                        m_sortModeLabel = labelTransform.GetComponent<Text>();
-                    }
-                }
                 return;
             }
 
@@ -566,7 +704,7 @@ namespace DmytroUdovychenko.PlayerPrefsRuntimeTool
 
             Outline outline = buttonGo.AddComponent<Outline>();
             outline.effectColor = PlayerPrefsRuntimeViewConstants.OutlineEffectColor;
-            outline.effectDistance = new Vector2(2f, -2f);
+            outline.effectDistance = new Vector2(PlayerPrefsRuntimeViewConstants.ControlOutlineDistance, -PlayerPrefsRuntimeViewConstants.ControlOutlineDistance);
 
             Button button = buttonGo.GetComponent<Button>();
             button.targetGraphic = buttonImage;
@@ -575,7 +713,7 @@ namespace DmytroUdovychenko.PlayerPrefsRuntimeTool
             ColorBlock colors = button.colors;
             colors.highlightedColor = PlayerPrefsRuntimeViewConstants.ControlHighlightedColor;
             colors.pressedColor = PlayerPrefsRuntimeViewConstants.ControlPressedColor;
-            colors.fadeDuration = 0.1f;
+            colors.fadeDuration = PlayerPrefsRuntimeViewConstants.ControlFadeDuration;
             button.colors = colors;
 
             Text label = CreateText(
@@ -608,26 +746,14 @@ namespace DmytroUdovychenko.PlayerPrefsRuntimeTool
                 return;
             }
 
-            string searchFieldName = PlayerPrefsRuntimeViewConstants.SearchFieldName;
-            Transform existingSearchField = header.Find(searchFieldName);
-            if (existingSearchField != null)
-            {
-                InputField existingInput = existingSearchField.GetComponent<InputField>();
-                if (existingInput != null)
-                {
-                    m_searchInputField = existingInput;
-                }
-                return;
-            }
-
-            GameObject inputFieldGo = new GameObject(searchFieldName, typeof(RectTransform), typeof(Image));
+            GameObject inputFieldGo = new GameObject(PlayerPrefsRuntimeViewConstants.SearchFieldName, typeof(RectTransform), typeof(Image));
             inputFieldGo.transform.SetParent(header, false);
 
             RectTransform inputFieldRT = inputFieldGo.GetComponent<RectTransform>();
             inputFieldRT.anchorMin = new Vector2(0.5f, 0f);
             inputFieldRT.anchorMax = new Vector2(0.5f, 1f);
             inputFieldRT.pivot = new Vector2(0.5f, 0.5f);
-            inputFieldRT.sizeDelta = new Vector2(360f, 0f);
+            inputFieldRT.sizeDelta = new Vector2(PlayerPrefsRuntimeViewConstants.SearchFieldWidth, 0f);
             inputFieldRT.anchoredPosition = new Vector2(0f, 0f);
 
             Image inputFieldImage = inputFieldGo.GetComponent<Image>();
@@ -635,19 +761,19 @@ namespace DmytroUdovychenko.PlayerPrefsRuntimeTool
 
             Outline outline = inputFieldGo.AddComponent<Outline>();
             outline.effectColor = PlayerPrefsRuntimeViewConstants.OutlineEffectColor;
-            outline.effectDistance = new Vector2(2f, -2f);
+            outline.effectDistance = new Vector2(PlayerPrefsRuntimeViewConstants.ControlOutlineDistance, -PlayerPrefsRuntimeViewConstants.ControlOutlineDistance);
 
             Shadow innerShadow = inputFieldGo.AddComponent<Shadow>();
             innerShadow.effectColor = PlayerPrefsRuntimeViewConstants.InnerShadowColor;
-            innerShadow.effectDistance = new Vector2(0, -1f);
+            innerShadow.effectDistance = new Vector2(0f, -PlayerPrefsRuntimeViewConstants.InnerShadowDistance);
 
             GameObject textArea = new GameObject(PlayerPrefsRuntimeViewConstants.TextAreaName, typeof(RectTransform));
             textArea.transform.SetParent(inputFieldGo.transform, false);
             RectTransform textAreaRT = textArea.GetComponent<RectTransform>();
             textAreaRT.anchorMin = Vector2.zero;
             textAreaRT.anchorMax = Vector2.one;
-            textAreaRT.offsetMin = new Vector2(10, 4);
-            textAreaRT.offsetMax = new Vector2(-10, -4);
+            textAreaRT.offsetMin = new Vector2(PlayerPrefsRuntimeViewConstants.SearchTextAreaPaddingX, PlayerPrefsRuntimeViewConstants.SearchTextAreaPaddingY);
+            textAreaRT.offsetMax = new Vector2(-PlayerPrefsRuntimeViewConstants.SearchTextAreaPaddingX, -PlayerPrefsRuntimeViewConstants.SearchTextAreaPaddingY);
 
             Text placeholderText = CreateText(PlayerPrefsRuntimeViewConstants.PlaceholderName, textArea.transform, PlayerPrefsRuntimeViewConstants.SearchPlaceholderFontSize, FontStyle.Normal, PlayerPrefsRuntimeViewConstants.PlaceholderTextColor, TextAnchor.MiddleLeft, false, out _);
             if (placeholderText != null)
@@ -663,7 +789,7 @@ namespace DmytroUdovychenko.PlayerPrefsRuntimeTool
 
             if (textGameObject != null)
             {
-                textGameObject.GetComponent<RectTransform>().sizeDelta = new Vector2(350, 100);
+                textGameObject.GetComponent<RectTransform>().sizeDelta = new Vector2(PlayerPrefsRuntimeViewConstants.SearchTextWidth, PlayerPrefsRuntimeViewConstants.SearchTextHeight);
             }
 
             InputField inputField = inputFieldGo.AddComponent<InputField>();
@@ -673,17 +799,11 @@ namespace DmytroUdovychenko.PlayerPrefsRuntimeTool
 
             m_searchInputField = inputField;
 
-            Button inputButton = inputFieldGo.AddComponent<Button>();
-            if (inputButton != null)
-            {
-                inputButton.transition = Selectable.Transition.ColorTint;
-                ColorBlock inputColors = inputButton.colors;
-                inputColors.normalColor = PlayerPrefsRuntimeViewConstants.ControlNormalColor;
-                inputColors.highlightedColor = PlayerPrefsRuntimeViewConstants.SearchFieldHighlightedColor;
-                inputColors.pressedColor = PlayerPrefsRuntimeViewConstants.ControlNormalColor;
-                inputColors.fadeDuration = 0.1f;
-                inputButton.colors = inputColors;
-            }
+            // No separate Button on this GameObject: InputField is itself a Selectable and Unity
+            // allows only one Selectable per GameObject. Adding a Button here failed at runtime
+            // ("A GameObject can only contain one 'Selectable' component"), so the styling below it
+            // never ran. If hover/press feedback on the field is ever wanted, configure the
+            // InputField's own transition/colors instead of adding a second component.
 
             GameObject clearButtonGo = new GameObject(PlayerPrefsRuntimeViewConstants.ClearButtonName, typeof(RectTransform), typeof(Image), typeof(Button));
             clearButtonGo.transform.SetParent(header, false);
@@ -692,8 +812,8 @@ namespace DmytroUdovychenko.PlayerPrefsRuntimeTool
             clearButtonRT.anchorMin = new Vector2(0.5f, 0f);
             clearButtonRT.anchorMax = new Vector2(0.5f, 1f);
             clearButtonRT.pivot = new Vector2(0f, 0.5f);
-            clearButtonRT.sizeDelta = new Vector2(60f, 0f);
-            clearButtonRT.anchoredPosition = new Vector2(190f, 0f);
+            clearButtonRT.sizeDelta = new Vector2(PlayerPrefsRuntimeViewConstants.ClearButtonWidth, 0f);
+            clearButtonRT.anchoredPosition = new Vector2(PlayerPrefsRuntimeViewConstants.ClearButtonOffsetX, 0f);
 
             Image clearButtonImage = clearButtonGo.GetComponent<Image>();
             clearButtonImage.color = PlayerPrefsRuntimeViewConstants.ControlNormalColor;
@@ -705,7 +825,7 @@ namespace DmytroUdovychenko.PlayerPrefsRuntimeTool
             ColorBlock clearColors = clearButton.colors;
             clearColors.highlightedColor = PlayerPrefsRuntimeViewConstants.ControlHighlightedColor;
             clearColors.pressedColor = PlayerPrefsRuntimeViewConstants.ControlPressedColor;
-            clearColors.fadeDuration = 0.1f;
+            clearColors.fadeDuration = PlayerPrefsRuntimeViewConstants.ControlFadeDuration;
             clearButton.colors = clearColors;
 
             Text clearButtonText = CreateText(PlayerPrefsRuntimeViewConstants.LabelName, clearButtonGo.transform, PlayerPrefsRuntimeViewConstants.ClearButtonFontSize, FontStyle.Bold, Color.white, TextAnchor.MiddleCenter, false, out _);
@@ -723,18 +843,14 @@ namespace DmytroUdovychenko.PlayerPrefsRuntimeTool
                 return;
             }
 
-            string closeName = PlayerPrefsRuntimeViewConstants.CloseButtonName;
-            if (header.Find(closeName) != null)
-                return;
-
-            GameObject closeGo = new GameObject(closeName, typeof(RectTransform), typeof(Image), typeof(Button));
+            GameObject closeGo = new GameObject(PlayerPrefsRuntimeViewConstants.CloseButtonName, typeof(RectTransform), typeof(Image), typeof(Button));
             closeGo.transform.SetParent(header, false);
 
             RectTransform closeRT = closeGo.GetComponent<RectTransform>();
             closeRT.anchorMin = new Vector2(1f, 0f);
             closeRT.anchorMax = new Vector2(1f, 1f);
             closeRT.pivot = new Vector2(1f, 0.5f);
-            closeRT.sizeDelta = new Vector2(70f, 0f);
+            closeRT.sizeDelta = new Vector2(PlayerPrefsRuntimeViewConstants.CloseButtonWidth, 0f);
             closeRT.anchoredPosition = new Vector2(0f, 0f);
 
             Image closeImage = closeGo.GetComponent<Image>();
@@ -747,7 +863,7 @@ namespace DmytroUdovychenko.PlayerPrefsRuntimeTool
             ColorBlock closeColors = closeButton.colors;
             closeColors.highlightedColor = PlayerPrefsRuntimeViewConstants.CloseButtonHighlightedColor;
             closeColors.pressedColor = PlayerPrefsRuntimeViewConstants.CloseButtonPressedColor;
-            closeColors.fadeDuration = 0.1f;
+            closeColors.fadeDuration = PlayerPrefsRuntimeViewConstants.ControlFadeDuration;
             closeButton.colors = closeColors;
 
             Text closeText = CreateText(PlayerPrefsRuntimeViewConstants.LabelName, closeGo.transform, PlayerPrefsRuntimeViewConstants.ViewerCloseButtonFontSize, FontStyle.Bold, Color.white, TextAnchor.MiddleCenter, false, out _);
@@ -757,36 +873,101 @@ namespace DmytroUdovychenko.PlayerPrefsRuntimeTool
             }
         }
 
+        private void CreateToolsToggleButton(Transform header)
+        {
+            if (header == null)
+            {
+                Debug.LogWarning("[PlayerPrefsRuntime] Header transform is null for tools toggle button");
+                return;
+            }
+
+            GameObject toggleGo = new GameObject(PlayerPrefsRuntimeViewConstants.ToolsToggleButtonName, typeof(RectTransform), typeof(Image), typeof(Button));
+            toggleGo.transform.SetParent(header, false);
+
+            RectTransform toggleRT = toggleGo.GetComponent<RectTransform>();
+            toggleRT.anchorMin = new Vector2(1f, 0f);
+            toggleRT.anchorMax = new Vector2(1f, 1f);
+            toggleRT.pivot = new Vector2(1f, 0.5f);
+            toggleRT.sizeDelta = new Vector2(PlayerPrefsRuntimeViewConstants.ToolsToggleButtonWidth, 0f);
+            toggleRT.anchoredPosition = new Vector2(
+                -(PlayerPrefsRuntimeViewConstants.CloseButtonWidth + PlayerPrefsRuntimeViewConstants.ToolsToggleButtonSpacing),
+                0f);
+
+            Image toggleImage = toggleGo.GetComponent<Image>();
+            toggleImage.color = PlayerPrefsRuntimeViewConstants.ControlNormalColor;
+
+            Outline outline = toggleGo.AddComponent<Outline>();
+            outline.effectColor = PlayerPrefsRuntimeViewConstants.OutlineEffectColor;
+            outline.effectDistance = new Vector2(PlayerPrefsRuntimeViewConstants.ControlOutlineDistance, -PlayerPrefsRuntimeViewConstants.ControlOutlineDistance);
+
+            Button toggleButton = toggleGo.GetComponent<Button>();
+            toggleButton.targetGraphic = toggleImage;
+            toggleButton.onClick.AddListener(HandleToolsToggleClicked);
+
+            ColorBlock colors = toggleButton.colors;
+            colors.normalColor = PlayerPrefsRuntimeViewConstants.ControlNormalColor;
+            colors.highlightedColor = PlayerPrefsRuntimeViewConstants.ControlHighlightedColor;
+            colors.pressedColor = PlayerPrefsRuntimeViewConstants.ControlPressedColor;
+            colors.fadeDuration = PlayerPrefsRuntimeViewConstants.ControlFadeDuration;
+            toggleButton.colors = colors;
+
+            Text toggleText = CreateText(PlayerPrefsRuntimeViewConstants.LabelName, toggleGo.transform, PlayerPrefsRuntimeViewConstants.ToolsToggleButtonFontSize, FontStyle.Bold, Color.white, TextAnchor.MiddleCenter, false, out _);
+            if (toggleText != null)
+            {
+                toggleText.text = PlayerPrefsRuntimeViewConstants.ToolsToggleButtonLabel;
+            }
+
+            m_toolsToggleButton = toggleButton;
+        }
+
         private void HandleSortModeButtonClicked()
         {
-            if (m_onSortModeButtonClicked != null)
-            {
-                m_onSortModeButtonClicked();
-            }
+            m_callbacks.OnSortModeButtonClicked?.Invoke();
         }
 
         private void HandleSearchValueChanged(string value)
         {
-            if (m_onSearchValueChanged != null)
-            {
-                m_onSearchValueChanged(value);
-            }
+            m_callbacks.OnSearchValueChanged?.Invoke(value);
         }
 
         private void HandleClearSearchClicked()
         {
-            if (m_onClearSearchClicked != null)
-            {
-                m_onClearSearchClicked();
-            }
+            m_callbacks.OnClearSearchClicked?.Invoke();
         }
 
         private void HandleCloseButtonClicked()
         {
-            if (m_onCloseButtonClicked != null)
-            {
-                m_onCloseButtonClicked();
-            }
+            m_callbacks.OnCloseButtonClicked?.Invoke();
+        }
+
+        private void HandleToolsToggleClicked()
+        {
+            m_callbacks.OnToolsToggleClicked?.Invoke();
+        }
+
+        private void HandleAddClicked()
+        {
+            m_callbacks.OnAddClicked?.Invoke();
+        }
+
+        private void HandleDeleteAllClicked()
+        {
+            m_callbacks.OnDeleteAllClicked?.Invoke();
+        }
+
+        private void HandleExportClicked()
+        {
+            m_callbacks.OnExportClicked?.Invoke();
+        }
+
+        private void HandleImportClicked()
+        {
+            m_callbacks.OnImportClicked?.Invoke();
+        }
+
+        private void HandleScrollValueChanged(Vector2 value)
+        {
+            m_callbacks.OnScrollValueChanged?.Invoke(value);
         }
 
         private Text CreateText(string name, Transform parent, int fontSize, FontStyle style, Color color, TextAnchor anchor, bool emphasize, out GameObject gameObject)
@@ -816,7 +997,7 @@ namespace DmytroUdovychenko.PlayerPrefsRuntimeTool
             {
                 Shadow shadow = go.AddComponent<Shadow>();
                 shadow.effectColor = PlayerPrefsRuntimeViewConstants.TextShadowColor;
-                shadow.effectDistance = new Vector2(1.8f, -1.8f);
+                shadow.effectDistance = new Vector2(PlayerPrefsRuntimeViewConstants.TextShadowDistance, -PlayerPrefsRuntimeViewConstants.TextShadowDistance);
             }
 
             return text;
@@ -826,76 +1007,10 @@ namespace DmytroUdovychenko.PlayerPrefsRuntimeTool
         {
             if (m_defaultFont == null)
             {
-#if UNITY_2022_2_OR_NEWER
-                m_defaultFont = Resources.GetBuiltinResource<Font>(PlayerPrefsRuntimeViewConstants.LegacyFontName);
-#else
-                m_defaultFont = Resources.GetBuiltinResource<Font>(PlayerPrefsRuntimeViewConstants.ArialFontName);
-#endif
-
-                if (m_defaultFont == null)
-                {
-                    Debug.LogWarning("[PlayerPrefsRuntime] Built-in font not found, using default font");
-                    m_defaultFont = Font.CreateDynamicFontFromOSFont(PlayerPrefsRuntimeViewConstants.DefaultFontName, 16);
-
-                    if (m_defaultFont == null)
-                    {
-                        m_defaultFont = Font.CreateDynamicFontFromOSFont(new string[] { PlayerPrefsRuntimeViewConstants.DefaultFontName, "Helvetica", "Sans-serif" }, 16);
-                    }
-                }
+                m_defaultFont = PlayerPrefsRuntimeUiFactory.ResolveDefaultFont();
             }
 
             return m_defaultFont;
-        }
-
-        private void EnsureEventSystemExists()
-        {
-#if UNITY_2023_1_OR_NEWER
-            EventSystem eventSystem = UnityEngine.Object.FindAnyObjectByType<EventSystem>();
-#else
-            EventSystem eventSystem = UnityEngine.Object.FindObjectOfType<EventSystem>();
-#endif
-            if (eventSystem == null)
-            {
-                GameObject es = new GameObject(PlayerPrefsRuntimeViewConstants.EventSystemName, typeof(EventSystem));
-                if (es == null)
-                {
-                    Debug.LogWarning("[PlayerPrefsRuntime] Failed to create EventSystem");
-                    return;
-                }
-
-                UnityEngine.Object.DontDestroyOnLoad(es);
-                eventSystem = es.GetComponent<EventSystem>();
-            }
-
-            EnsureEventSystemInputModule(eventSystem);
-        }
-
-        private static void EnsureEventSystemInputModule(EventSystem eventSystem)
-        {
-#if ENABLE_INPUT_SYSTEM
-            InputSystemUIInputModule inputSystemModule = eventSystem.GetComponent<InputSystemUIInputModule>();
-            if (inputSystemModule == null)
-            {
-                inputSystemModule = eventSystem.gameObject.AddComponent<InputSystemUIInputModule>();
-            }
-
-            if (inputSystemModule != null)
-            {
-                inputSystemModule.enabled = true;
-            }
-
-            StandaloneInputModule legacyModule = eventSystem.GetComponent<StandaloneInputModule>();
-            if (legacyModule != null)
-            {
-                // Disable legacy module if we are specifically using the new Input System for UI.
-                legacyModule.enabled = false;
-            }
-#elif ENABLE_LEGACY_INPUT_MANAGER
-            if (eventSystem.GetComponent<StandaloneInputModule>() == null)
-            {
-                eventSystem.gameObject.AddComponent<StandaloneInputModule>();
-            }
-#endif
         }
     }
 }

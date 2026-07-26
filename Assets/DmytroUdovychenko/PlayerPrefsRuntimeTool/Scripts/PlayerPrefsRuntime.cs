@@ -7,6 +7,7 @@
 // ====================================================
 
 #if PLAYER_PREFS_RUNTIME_TOOL
+using System;
 using UnityEngine;
 using System.Collections.Generic;
 using System.Linq;
@@ -14,15 +15,27 @@ using System.Linq;
 namespace DmytroUdovychenko.PlayerPrefsRuntimeTool
 {
     /// <summary>
-    /// Provides runtime access to all PlayerPrefs across multiple platforms.
-    /// Supports Windows, macOS, iOS, and Android platforms.
+    /// Provides runtime access to all PlayerPrefs across multiple platforms:
+    /// retrieval, viewing, editing, export/import. Supports Windows, macOS, iOS,
+    /// Android and WebGL platforms.
     /// </summary>
     public static class PlayerPrefsRuntime
     {
+        /// <summary>
+        /// Version of the PlayerPrefsRuntime Tool package.
+        /// </summary>
+        public const string Version = "3.1.0";
+
         private static IPlayerPrefsRuntimeFetcher s_runtimeFetcher;
         private static PlayerPrefsRuntimeViewer s_viewer;
 
         public static bool IsVisible => s_viewer != null && s_viewer.IsVisible;
+
+        /// <summary>
+        /// Raised after a PlayerPrefs entry is changed through this tool (set, deleted or imported).
+        /// The argument is the affected key; it is null when all entries were removed via <see cref="DeleteAll"/>.
+        /// </summary>
+        public static event Action<string> OnEntryChanged;
 
         /// <summary>
         /// Initializes and returns the appropriate fetcher for the current platform.
@@ -47,6 +60,8 @@ namespace DmytroUdovychenko.PlayerPrefsRuntimeTool
             return new PlayerPrefsRuntimeFetcherAndroid();
 #elif UNITY_IOS
             return new PlayerPrefsRuntimeFetcherIOS();
+#elif UNITY_WEBGL
+            return new PlayerPrefsRuntimeFetcherWebGL();
 #elif UNITY_STANDALONE_WIN
             return new PlayerPrefsRuntimeFetcherWindows();
 #elif UNITY_STANDALONE_OSX
@@ -64,21 +79,63 @@ namespace DmytroUdovychenko.PlayerPrefsRuntimeTool
         /// <returns>A dictionary containing all PlayerPrefs keys and values.</returns>
         public static Dictionary<string, object> GetAllPlayerPrefs()
         {
+            TryGetAllPlayerPrefs(out Dictionary<string, object> prefs);
+            return prefs;
+        }
+
+        /// <summary>
+        /// Retrieves all available entries and reports whether the platform fetcher
+        /// proved that the snapshot is complete enough for a destructive operation.
+        /// </summary>
+        internal static bool TryGetAllPlayerPrefs(out Dictionary<string, object> prefs)
+        {
+            bool saveSucceeded = true;
+            try
+            {
+                PlayerPrefs.Save();
+            }
+            catch (Exception exception)
+            {
+                Debug.LogWarning($"[PlayerPrefsRuntime] Failed to flush PlayerPrefs before enumeration: {exception.Message}");
+                saveSucceeded = false;
+            }
+
             if (s_runtimeFetcher == null)
             {
                 s_runtimeFetcher = GetFetcher();
             }
 
-            if (s_runtimeFetcher != null)
+            bool isComplete = false;
+            if (s_runtimeFetcher is IPlayerPrefsRuntimeFetcherWithStatus statusFetcher)
             {
-                return s_runtimeFetcher.GetAllPlayerPrefs();
+                isComplete = statusFetcher.TryGetAllPlayerPrefs(out prefs);
+            }
+            else if (s_runtimeFetcher != null)
+            {
+                // Preserve compatibility with third-party implementations of the original
+                // public interface, but never trust an unverified snapshot for DeleteAll.
+                prefs = s_runtimeFetcher.GetAllPlayerPrefs();
+                Debug.LogWarning("[PlayerPrefsRuntime] Fetcher does not report snapshot completeness.");
             }
             else
             {
                 Debug.LogWarning("[PlayerPrefsRuntime] PlayerPrefs fetcher does not exist for the current platform.");
-                return new Dictionary<string, object>();
+                prefs = null;
             }
 
+            if (prefs == null)
+            {
+                prefs = new Dictionary<string, object>();
+                isComplete = false;
+            }
+
+            if (prefs.Remove(string.Empty))
+            {
+                Debug.LogWarning("[PlayerPrefsRuntime] Fetcher returned an empty PlayerPrefs key. Entry skipped.");
+                isComplete = false;
+            }
+
+            return isComplete && saveSucceeded;
         }
 
         /// <summary>
@@ -88,6 +145,11 @@ namespace DmytroUdovychenko.PlayerPrefsRuntimeTool
         public static void LogAllPlayerPrefs()
         {
             Dictionary<string, object> allPrefs = GetAllPlayerPrefs();
+            LogPlayerPrefs(allPrefs);
+        }
+
+        private static void LogPlayerPrefs(Dictionary<string, object> allPrefs)
+        {
             Debug.Log($"[PlayerPrefsRuntime] Found {allPrefs.Count} PlayerPrefs entries:");
 
             foreach (KeyValuePair<string, object> kvp in allPrefs)
@@ -98,11 +160,8 @@ namespace DmytroUdovychenko.PlayerPrefsRuntimeTool
 
         public static void ShowAllPlayerPrefs()
         {
-            // Log all PlayerPrefs to console
-            LogAllPlayerPrefs();
-
-            // Retrieve all PlayerPrefs as Dictionary <key, value>
             Dictionary<string, object> allPrefs = GetAllPlayerPrefs();
+            LogPlayerPrefs(allPrefs);
 
             if (s_viewer == null)
             {
@@ -131,6 +190,138 @@ namespace DmytroUdovychenko.PlayerPrefsRuntimeTool
                 s_viewer.ShowEntries(entries);
 
                 Debug.Log($"[PlayerPrefsRuntimeExample] Example completed. Found {allPrefs.Count} PlayerPrefs entries.");
+            }
+        }
+
+        /// <summary>
+        /// Sets an integer PlayerPrefs value and saves immediately.
+        /// </summary>
+        /// <param name="key">PlayerPrefs key. Must not be null or empty.</param>
+        /// <param name="value">Value to store.</param>
+        public static void SetInt(string key, int value)
+        {
+            PlayerPrefsRuntimeWriter.SetInt(key, value);
+        }
+
+        /// <summary>
+        /// Sets a float PlayerPrefs value and saves immediately.
+        /// </summary>
+        /// <param name="key">PlayerPrefs key. Must not be null or empty.</param>
+        /// <param name="value">Value to store.</param>
+        public static void SetFloat(string key, float value)
+        {
+            PlayerPrefsRuntimeWriter.SetFloat(key, value);
+        }
+
+        /// <summary>
+        /// Sets a string PlayerPrefs value and saves immediately. A null value is stored as an empty string.
+        /// </summary>
+        /// <param name="key">PlayerPrefs key. Must not be null or empty.</param>
+        /// <param name="value">Value to store.</param>
+        public static void SetString(string key, string value)
+        {
+            PlayerPrefsRuntimeWriter.SetString(key, value);
+        }
+
+        /// <summary>
+        /// Deletes a single PlayerPrefs key and saves immediately.
+        /// </summary>
+        /// <param name="key">PlayerPrefs key. Must not be null or empty.</param>
+        public static void DeleteKey(string key)
+        {
+            PlayerPrefsRuntimeWriter.DeleteKey(key);
+        }
+
+        /// <summary>
+        /// Deletes ALL PlayerPrefs and saves immediately. On iOS/macOS this clears the application's
+        /// entire UserDefaults domain, including engine-managed keys. Deletion is cancelled unless
+        /// a complete JSON backup is written to <see cref="Application.persistentDataPath"/>.
+        /// </summary>
+        public static void DeleteAll()
+        {
+            TryDeleteAll();
+        }
+
+        /// <summary>
+        /// Attempts to back up and delete all PlayerPrefs.
+        /// </summary>
+        /// <returns>
+        /// True when a verified complete snapshot was backed up and deleted, or when the
+        /// platform fetcher verified that the store was already empty.
+        /// </returns>
+        public static bool TryDeleteAll()
+        {
+            return PlayerPrefsRuntimeWriter.DeleteAll();
+        }
+
+        /// <summary>
+        /// Exports all PlayerPrefs to a versioned JSON string that can be re-imported with
+        /// <see cref="ImportFromJson"/>.
+        /// </summary>
+        /// <returns>JSON document with all exportable entries.</returns>
+        public static string ExportToJson()
+        {
+            return PlayerPrefsRuntimeWriter.ExportToJson();
+        }
+
+        /// <summary>
+        /// Imports PlayerPrefs entries from a JSON document produced by <see cref="ExportToJson"/>
+        /// (a flat <c>{"key": value}</c> object is also accepted). Existing keys are overwritten,
+        /// invalid entries are skipped and reported per key. A best-effort JSON backup is attempted
+        /// in <see cref="Application.persistentDataPath"/> before any entry is applied.
+        /// </summary>
+        /// <param name="json">JSON document to import.</param>
+        /// <returns>Import summary with the applied entry count and per-key errors.</returns>
+        public static PlayerPrefsRuntimeImportResult ImportFromJson(string json)
+        {
+            return PlayerPrefsRuntimeWriter.ImportFromJson(json);
+        }
+
+        /// <summary>
+        /// Enables the built-in device gesture that opens the viewer:
+        /// hold three fingers on the screen for two seconds. Off by default.
+        /// </summary>
+        public static void EnableGestureTrigger()
+        {
+            PlayerPrefsRuntimeGestureTrigger.Enable();
+        }
+
+        /// <summary>
+        /// Disables the gesture trigger previously enabled via <see cref="EnableGestureTrigger"/>.
+        /// </summary>
+        public static void DisableGestureTrigger()
+        {
+            PlayerPrefsRuntimeGestureTrigger.Disable();
+        }
+
+        /// <summary>
+        /// True while the gesture trigger is active.
+        /// </summary>
+        public static bool IsGestureTriggerEnabled => PlayerPrefsRuntimeGestureTrigger.IsEnabled;
+
+        /// <summary>
+        /// Invokes <see cref="OnEntryChanged"/>, isolating the tool from exceptions in user handlers.
+        /// </summary>
+        internal static void RaiseEntryChanged(string key)
+        {
+            Action<string> handlers = OnEntryChanged;
+            if (handlers == null)
+            {
+                return;
+            }
+
+            Delegate[] invocationList = handlers.GetInvocationList();
+            for (int i = 0; i < invocationList.Length; i++)
+            {
+                Action<string> handler = (Action<string>)invocationList[i];
+                try
+                {
+                    handler(key);
+                }
+                catch (Exception exception)
+                {
+                    Debug.LogWarning($"[PlayerPrefsRuntime] OnEntryChanged handler threw an exception: {exception}");
+                }
             }
         }
     }

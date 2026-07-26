@@ -1,4 +1,5 @@
 #if PLAYER_PREFS_RUNTIME_TOOL
+#if UNITY_EDITOR_OSX
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -16,7 +17,9 @@ namespace DmytroUdovychenko.PlayerPrefsRuntimeTool
     /// macOS editor implementation for retrieving PlayerPrefs at runtime.
     /// Parses plist files directly from the file system in the Unity editor.
     /// </summary>
-    public class PlayerPrefsRuntimeFetcherMacOSEditor : IPlayerPrefsRuntimeFetcher
+    public class PlayerPrefsRuntimeFetcherMacOSEditor :
+        IPlayerPrefsRuntimeFetcher,
+        IPlayerPrefsRuntimeFetcherWithStatus
     {
         /// <summary>
         /// Retrieves all PlayerPrefs by parsing macOS plist files.
@@ -24,20 +27,34 @@ namespace DmytroUdovychenko.PlayerPrefsRuntimeTool
         /// <returns>A dictionary containing all PlayerPrefs keys and values.</returns>
         public Dictionary<string, object> GetAllPlayerPrefs()
         {
-            Dictionary<string, object> prefs = new Dictionary<string, object>();
+            TryGetAllPlayerPrefs(out Dictionary<string, object> prefs);
+            return prefs;
+        }
 
+        bool IPlayerPrefsRuntimeFetcherWithStatus.TryGetAllPlayerPrefs(out Dictionary<string, object> prefs)
+        {
+            return TryGetAllPlayerPrefs(out prefs);
+        }
+
+        private static bool TryGetAllPlayerPrefs(out Dictionary<string, object> prefs)
+        {
+            prefs = new Dictionary<string, object>();
             try
             {
                 string companyName = string.IsNullOrEmpty(Application.companyName) ? "UnityDefaultCompany" : Application.companyName;
                 string productName = string.IsNullOrEmpty(Application.productName) ? "UnnamedProduct" : Application.productName;
 
-                string plistPath = ResolvePlayerPrefsPath(companyName, productName);
+                if (!TryResolvePlayerPrefsPath(companyName, productName, out string plistPath, out bool fileExists))
+                {
+                    return false;
+                }
+
                 UnityDebug.Log($"[PlayerPrefsRuntime] Looking for PlayerPrefs at path: {plistPath}");
                 
-                if (!File.Exists(plistPath))
+                if (!fileExists)
                 {
-                    UnityDebug.LogWarning($"[PlayerPrefsRuntime] PlayerPrefs plist not found at path: {plistPath}");
-                    return prefs;
+                    UnityDebug.Log($"[PlayerPrefsRuntime] PlayerPrefs plist not found; the store is empty: {plistPath}");
+                    return true;
                 }
 
                 if (IsBinaryPlist(plistPath))
@@ -47,22 +64,20 @@ namespace DmytroUdovychenko.PlayerPrefsRuntimeTool
                     
                     if (!string.IsNullOrEmpty(json))
                     {
-                        prefs = DeserializeJsonPrefs(json);
+                        return TryDeserializeJsonPrefs(json, out prefs);
                     }
+
+                    return false;
                 }
-                else
-                {
-                    UnityDebug.Log("[PlayerPrefsRuntime] Detected XML plist format");
-                    prefs = ParseXmlPlist(plistPath);
-                }
+
+                UnityDebug.Log("[PlayerPrefsRuntime] Detected XML plist format");
+                return TryParseXmlPlist(plistPath, out prefs);
             }
             catch (Exception e)
             {
                 UnityDebug.LogError($"[PlayerPrefsRuntime] Error fetching PlayerPrefs on macOS editor: {e.Message}\n{e.StackTrace}");
+                return false;
             }
-
-            UnityDebug.Log($"[PlayerPrefsRuntime] Successfully retrieved {prefs.Count} PlayerPrefs entries on macOS editor");
-            return prefs ?? new Dictionary<string, object>();
         }
 
         /// <summary>
@@ -70,23 +85,69 @@ namespace DmytroUdovychenko.PlayerPrefsRuntimeTool
         /// </summary>
         /// <param name="companyName">Unity company name</param>
         /// <param name="productName">Unity product name</param>
-        /// <returns>Path to the plist file</returns>
-        private static string ResolvePlayerPrefsPath(string companyName, string productName)
+        private static bool TryResolvePlayerPrefsPath(
+            string companyName,
+            string productName,
+            out string path,
+            out bool fileExists)
         {
             string homeDirectory = Environment.GetFolderPath(Environment.SpecialFolder.Personal);
             string preferencesDirectory = Path.Combine(homeDirectory, "Library/Preferences");
             string primaryFileName = $"unity.{companyName}.{productName}.plist";
             string primaryPath = Path.Combine(preferencesDirectory, primaryFileName);
 
-            if (File.Exists(primaryPath))
+            if (!TryGetFileExists(primaryPath, out bool primaryExists))
             {
-                return primaryPath;
+                path = primaryPath;
+                fileExists = false;
+                return false;
+            }
+
+            if (primaryExists)
+            {
+                path = primaryPath;
+                fileExists = true;
+                return true;
             }
 
             string legacyFileName = $"unity.{companyName}.{productName}.playerprefs";
             string legacyPath = Path.Combine(preferencesDirectory, legacyFileName);
+            if (!TryGetFileExists(legacyPath, out bool legacyExists))
+            {
+                path = legacyPath;
+                fileExists = false;
+                return false;
+            }
 
-            return legacyPath;
+            path = legacyPath;
+            fileExists = legacyExists;
+            return true;
+        }
+
+        private static bool TryGetFileExists(string path, out bool exists)
+        {
+            try
+            {
+                File.GetAttributes(path);
+                exists = true;
+                return true;
+            }
+            catch (FileNotFoundException)
+            {
+                exists = false;
+                return true;
+            }
+            catch (DirectoryNotFoundException)
+            {
+                exists = false;
+                return true;
+            }
+            catch (Exception exception)
+            {
+                UnityDebug.LogWarning($"[PlayerPrefsRuntime] Failed to inspect plist path '{path}': {exception.Message}");
+                exists = false;
+                return false;
+            }
         }
 
         /// <summary>
@@ -176,8 +237,11 @@ namespace DmytroUdovychenko.PlayerPrefsRuntimeTool
         /// </summary>
         /// <param name="path">Path to the XML plist file</param>
         /// <returns>Dictionary containing the plist data</returns>
-        private static Dictionary<string, object> ParseXmlPlist(string path)
+        internal static bool TryParseXmlPlist(
+            string path,
+            out Dictionary<string, object> prefs)
         {
+            prefs = new Dictionary<string, object>();
             try
             {
                 XmlDocument document = new XmlDocument();
@@ -196,15 +260,15 @@ namespace DmytroUdovychenko.PlayerPrefsRuntimeTool
                 if (dictionaryNode == null)
                 {
                     UnityDebug.LogWarning("[PlayerPrefsRuntime] plist file does not contain a root dictionary.");
-                    return new Dictionary<string, object>();
+                    return false;
                 }
 
-                return ParseDictionaryNode(dictionaryNode);
+                return TryParseDictionaryNode(dictionaryNode, out prefs);
             }
             catch (Exception e)
             {
                 UnityDebug.LogError($"[PlayerPrefsRuntime] Failed to parse XML plist: {e.Message}");
-                return new Dictionary<string, object>();
+                return false;
             }
         }
 
@@ -213,34 +277,50 @@ namespace DmytroUdovychenko.PlayerPrefsRuntimeTool
         /// </summary>
         /// <param name="dictNode">The dictionary XML node</param>
         /// <returns>Dictionary containing the parsed data</returns>
-        private static Dictionary<string, object> ParseDictionaryNode(XmlNode dictNode)
+        private static bool TryParseDictionaryNode(
+            XmlNode dictNode,
+            out Dictionary<string, object> result)
         {
-            Dictionary<string, object> result = new Dictionary<string, object>();
+            result = new Dictionary<string, object>();
+            bool isComplete = true;
 
             for (int i = 0; i < dictNode.ChildNodes.Count; i++)
             {
                 XmlNode keyNode = dictNode.ChildNodes[i];
                 if (!string.Equals(keyNode.Name, "key", StringComparison.OrdinalIgnoreCase))
                 {
+                    if (keyNode.NodeType == XmlNodeType.Element)
+                    {
+                        isComplete = false;
+                    }
                     continue;
                 }
 
                 string key = keyNode.InnerText;
                 if (string.IsNullOrEmpty(key))
                 {
+                    isComplete = false;
                     continue;
                 }
 
                 XmlNode valueNode = ++i < dictNode.ChildNodes.Count ? dictNode.ChildNodes[i] : null;
                 if (valueNode == null)
                 {
+                    isComplete = false;
                     continue;
                 }
 
-                result[key] = ParseValueNode(valueNode);
+                object value = ParseValueNode(valueNode, out bool valueComplete);
+                if (result.ContainsKey(key))
+                {
+                    isComplete = false;
+                }
+
+                result[key] = value;
+                isComplete &= valueComplete;
             }
 
-            return result;
+            return isComplete;
         }
 
         /// <summary>
@@ -248,8 +328,9 @@ namespace DmytroUdovychenko.PlayerPrefsRuntimeTool
         /// </summary>
         /// <param name="valueNode">The value XML node</param>
         /// <returns>Parsed value</returns>
-        private static object ParseValueNode(XmlNode valueNode)
+        private static object ParseValueNode(XmlNode valueNode, out bool isComplete)
         {
+            isComplete = true;
             switch (valueNode.Name.ToLowerInvariant())
             {
                 case "string":
@@ -265,18 +346,38 @@ namespace DmytroUdovychenko.PlayerPrefsRuntimeTool
 
                         return longValue;
                     }
+                    isComplete = false;
                     return 0;
                 case "real":
-                    if (double.TryParse(valueNode.InnerText, NumberStyles.Float, CultureInfo.InvariantCulture, out double doubleValue))
+                    string realText = (valueNode.InnerText ?? string.Empty).Trim();
+                    if (string.Equals(realText, "nan", StringComparison.OrdinalIgnoreCase))
                     {
-                        return Convert.ToSingle(doubleValue);
+                        return float.NaN;
                     }
+                    if (string.Equals(realText, "+infinity", StringComparison.OrdinalIgnoreCase))
+                    {
+                        return float.PositiveInfinity;
+                    }
+                    if (string.Equals(realText, "-infinity", StringComparison.OrdinalIgnoreCase))
+                    {
+                        return float.NegativeInfinity;
+                    }
+                    if (double.TryParse(realText, NumberStyles.Float, CultureInfo.InvariantCulture, out double doubleValue))
+                    {
+                        float floatValue = Convert.ToSingle(doubleValue);
+                        isComplete = (double)floatValue == doubleValue;
+                        return floatValue;
+                    }
+                    isComplete = false;
                     return 0f;
                 case "true":
                     return true;
                 case "false":
                     return false;
                 case "data":
+                    // Preserve the best-effort display value, but never treat a binary plist
+                    // value as a lossless PlayerPrefs string for destructive backup purposes.
+                    isComplete = false;
                     try
                     {
                         byte[] binary = Convert.FromBase64String(valueNode.InnerText);
@@ -294,15 +395,20 @@ namespace DmytroUdovychenko.PlayerPrefsRuntimeTool
                         return valueNode.InnerText;
                     }
                 case "dict":
-                    return ParseDictionaryNode(valueNode);
+                    bool dictionaryComplete = TryParseDictionaryNode(valueNode, out Dictionary<string, object> dictionary);
+                    isComplete = dictionaryComplete;
+                    return dictionary;
                 case "array":
                     List<object> list = new List<object>();
                     foreach (XmlNode child in valueNode.ChildNodes)
                     {
-                        list.Add(ParseValueNode(child));
+                        object childValue = ParseValueNode(child, out bool childComplete);
+                        list.Add(childValue);
+                        isComplete &= childComplete;
                     }
                     return list;
                 default:
+                    isComplete = false;
                     return valueNode.InnerText;
             }
         }
@@ -312,8 +418,11 @@ namespace DmytroUdovychenko.PlayerPrefsRuntimeTool
         /// </summary>
         /// <param name="json">JSON string containing PlayerPrefs data</param>
         /// <returns>Dictionary with normalized PlayerPrefs data</returns>
-        private static Dictionary<string, object> DeserializeJsonPrefs(string json)
+        private static bool TryDeserializeJsonPrefs(
+            string json,
+            out Dictionary<string, object> prefs)
         {
+            prefs = new Dictionary<string, object>();
             try
             {
                 // Ensure proper UTF-8 handling
@@ -321,14 +430,16 @@ namespace DmytroUdovychenko.PlayerPrefsRuntimeTool
                 {
                     StringEscapeHandling = StringEscapeHandling.EscapeNonAscii
                 });
-                return PlayerPrefsRuntimeJsonHelper.NormalizeDictionary(rawPrefs);
+                prefs = PlayerPrefsRuntimeJsonHelper.NormalizeDictionary(rawPrefs, out bool isComplete);
+                return isComplete;
             }
             catch (Exception e)
             {
                 UnityDebug.LogError($"[PlayerPrefsRuntime] Failed to deserialize PlayerPrefs JSON: {e.Message}\nJSON: {json}");
-                return new Dictionary<string, object>();
+                return false;
             }
         }
     }
 }
+#endif
 #endif

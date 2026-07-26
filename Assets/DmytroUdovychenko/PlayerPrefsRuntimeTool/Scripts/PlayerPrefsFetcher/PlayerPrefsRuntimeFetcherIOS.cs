@@ -19,7 +19,9 @@ namespace DmytroUdovychenko.PlayerPrefsRuntimeTool
     /// iOS implementation for retrieving PlayerPrefs at runtime.
     /// Uses native iOS APIs via P/Invoke to access UserDefaults.
     /// </summary>
-    public class PlayerPrefsRuntimeFetcherIOS : IPlayerPrefsRuntimeFetcher
+    public class PlayerPrefsRuntimeFetcherIOS :
+        IPlayerPrefsRuntimeFetcher,
+        IPlayerPrefsRuntimeFetcherWithStatus
     {
         [DllImport("__Internal")]
         private static extern System.IntPtr GetPlayerPrefsJSON();
@@ -67,6 +69,16 @@ namespace DmytroUdovychenko.PlayerPrefsRuntimeTool
 
             Debug.Log($"[PlayerPrefsRuntime] Successfully retrieved {prefs.Count} PlayerPrefs entries on iOS");
             return prefs;
+        }
+
+        bool IPlayerPrefsRuntimeFetcherWithStatus.TryGetAllPlayerPrefs(out Dictionary<string, object> prefs)
+        {
+            prefs = GetAllPlayerPrefs();
+
+            // The current native bridge filters non-NSString/NSNumber values before
+            // returning JSON and exposes no skipped-count or success status. Its result
+            // is useful for display, but cannot prove a lossless backup of the domain.
+            return false;
         }
 
         /// <summary>

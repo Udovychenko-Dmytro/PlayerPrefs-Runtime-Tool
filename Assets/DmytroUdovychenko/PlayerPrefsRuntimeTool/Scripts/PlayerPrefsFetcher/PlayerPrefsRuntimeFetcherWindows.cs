@@ -14,10 +14,24 @@ using System.Collections.Generic;
 
 namespace DmytroUdovychenko.PlayerPrefsRuntimeTool
 {
-    public class PlayerPrefsRuntimeFetcherWindows : IPlayerPrefsRuntimeFetcher
+    public class PlayerPrefsRuntimeFetcherWindows :
+        IPlayerPrefsRuntimeFetcher,
+        IPlayerPrefsRuntimeFetcherWithStatus
     {
         public Dictionary<string, object> GetAllPlayerPrefs()
         {
+            TryGetAllPlayerPrefs(out Dictionary<string, object> prefs);
+            return prefs;
+        }
+
+        bool IPlayerPrefsRuntimeFetcherWithStatus.TryGetAllPlayerPrefs(out Dictionary<string, object> prefs)
+        {
+            return TryGetAllPlayerPrefs(out prefs);
+        }
+
+        private static bool TryGetAllPlayerPrefs(out Dictionary<string, object> prefs)
+        {
+            prefs = new Dictionary<string, object>(StringComparer.Ordinal);
             try
             {
                 string companyName = string.IsNullOrWhiteSpace(Application.companyName) ? "UnityDefaultCompany" : Application.companyName;
@@ -25,14 +39,13 @@ namespace DmytroUdovychenko.PlayerPrefsRuntimeTool
                 string registryPath = $@"Software\{companyName}\{productName}";
 
                 Debug.Log($"[PlayerPrefsRuntime] Fetching Windows PlayerPrefs from registry path: {registryPath}");
-                return PlayerPrefsRuntimeWindowsRegistryReader.ReadPlayerPrefs(registryPath);
+                return PlayerPrefsRuntimeWindowsRegistryReader.TryReadPlayerPrefs(registryPath, out prefs);
             }
             catch (Exception e)
             {
                 Debug.LogError($"[PlayerPrefsRuntime] Error fetching PlayerPrefs on Windows: {e.Message}\n{e.StackTrace}");
+                return false;
             }
-
-            return new Dictionary<string, object>(StringComparer.Ordinal);
         }
     }
 }

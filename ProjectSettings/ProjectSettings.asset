@@ -158,9 +158,9 @@ PlayerSettings:
   androidSupportedAspectRatio: 1
   androidMaxAspectRatio: 2.1
   applicationIdentifier:
-    Android: com.dmytroudovychenko.playerprefsruntime
+    Android: com.android.player_prefs_runtime
     Standalone: com.dmytro-udovychenko.playerprefsruntime
-    iPhone: com.DefaultCompany.PlayerPrefs-runtime-extended
+    iPhone: com.dmytroudovychenko.iostest
   buildNumber:
     Standalone: 0
     VisionOS: 0
@@ -231,12 +231,12 @@ PlayerSettings:
   metalAPIValidation: 1
   iOSRenderExtraFrameOnPause: 0
   iosCopyPluginsCodeInsteadOfSymlink: 0
-  appleDeveloperTeamID: 
+  appleDeveloperTeamID: ZN7GT57583
   iOSManualSigningProvisioningProfileID: 
   tvOSManualSigningProvisioningProfileID: 
   iOSManualSigningProvisioningProfileType: 0
   tvOSManualSigningProvisioningProfileType: 0
-  appleEnableAutomaticSigning: 0
+  appleEnableAutomaticSigning: 1
   iOSRequireARKit: 0
   iOSAutomaticallyDetectAndAddCapabilities: 1
   appleEnableProMotion: 0
@@ -811,9 +811,10 @@ PlayerSettings:
   webGLDecompressionFallback: 0
   webGLPowerPreference: 2
   scriptingDefineSymbols:
-    Android: PLAYER_PREFS_RUNTIME_TOOL
+    Android: DEBUG;PLAYER_PREFS_RUNTIME_TOOL
     Standalone: RELEASE;PLAYER_PREFS_RUNTIME_TOOL
-    iPhone: PLAYER_PREFS_RUNTIME_TOOL
+    WebGL: PLAYER_PREFS_RUNTIME_TOOL
+    iPhone: DEBUG;PLAYER_PREFS_RUNTIME_TOOL
   additionalCompilerArguments: {}
   platformArchitecture: {}
   scriptingBackend:
@@ -848,14 +849,14 @@ PlayerSettings:
   apiCompatibilityLevelPerPlatform: {}
   m_RenderingPath: 1
   m_MobileRenderingPath: 1
-  metroPackageName: PlayerPrefs runtime extended
+  metroPackageName: PlayerPrefsRuntime
   metroPackageVersion: 
   metroCertificatePath: 
   metroCertificatePassword: 
   metroCertificateSubject: 
   metroCertificateIssuer: 
   metroCertificateNotAfter: 0000000000000000
-  metroApplicationDescription: PlayerPrefs runtime extended
+  metroApplicationDescription: PlayerPrefsRuntime
   wsaImages: {}
   metroTileShortName: 
   metroTileShowName: 0
@@ -920,11 +921,11 @@ PlayerSettings:
   apiCompatibilityLevel: 6
   activeInputHandler: 0
   windowsGamepadBackendHint: 0
-  cloudProjectId: fa7d14ba-0383-4c98-a924-3d71b1a7b43c
+  cloudProjectId: 00000000-0000-0000-0000-000000000000
   framebufferDepthMemorylessMode: 0
   qualitySettingsNames: []
-  projectName: PlayerPrefs runtime extended
-  organizationId: dudovychenko
+  projectName: 
+  organizationId: example-studio
   cloudEnabled: 0
   legacyClampBlendShapeWeights: 0
   playerDataPath: 

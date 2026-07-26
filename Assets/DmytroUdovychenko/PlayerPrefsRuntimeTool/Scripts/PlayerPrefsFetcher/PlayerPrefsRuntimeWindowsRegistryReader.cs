@@ -2,36 +2,35 @@
 #if UNITY_EDITOR_WIN || UNITY_STANDALONE_WIN
 using System;
 using System.Collections.Generic;
-using System.Globalization;
 using System.Runtime.InteropServices;
 using System.Text;
-using System.Text.RegularExpressions;
 using UnityEngine;
 
 namespace DmytroUdovychenko.PlayerPrefsRuntimeTool
 {
     /// <summary>
     /// Shared Windows registry reader that normalizes Unity PlayerPrefs data.
+    /// Value decoding is delegated to <see cref="PlayerPrefsRuntimeRegistryValueDecoder"/>.
     /// </summary>
     internal static class PlayerPrefsRuntimeWindowsRegistryReader
     {
         private const uint HKeyCurrentUser = 0x80000001;
         private const uint KeyRead = 0x20019;
 
-        private const uint RegSz = 1;
-        private const uint RegExpandSz = 2;
-        private const uint RegBinary = 3;
-        private const uint RegDword = 4;
-        private const uint RegQword = 11;
-
         private const int ErrorSuccess = 0;
+        private const int ErrorFileNotFound = 2;
+        private const int ErrorPathNotFound = 3;
         private const int ErrorMoreData = 234;
         private const int ErrorNoMoreItems = 259;
 
         private const int InitialValueNameCapacity = 256;
         private const int InitialDataCapacity = 1024;
 
-        private static readonly Regex s_hashSuffixRegex = new Regex(@"_h\d+$", RegexOptions.Compiled | RegexOptions.CultureInvariant);
+        // Windows caps registry value names at 16,383 characters and PlayerPrefs values are far
+        // smaller than 16 MB. Needing more than this means the retry loop is not converging, so
+        // the entry is skipped instead of being retried forever.
+        private const int MaxValueNameCapacity = 16384;
+        private const int MaxDataCapacity = 16 * 1024 * 1024;
 
         [DllImport("advapi32.dll", CharSet = CharSet.Unicode)]
         private static extern int RegOpenKeyEx(uint hKey, string lpSubKey, uint ulOptions, uint samDesired, out IntPtr phkResult);
@@ -52,32 +51,44 @@ namespace DmytroUdovychenko.PlayerPrefsRuntimeTool
 
         internal static Dictionary<string, object> ReadPlayerPrefs(string registryPath)
         {
-            Dictionary<string, object> prefs = new Dictionary<string, object>(StringComparer.Ordinal);
+            TryReadPlayerPrefs(registryPath, out Dictionary<string, object> prefs);
+            return prefs;
+        }
 
+        internal static bool TryReadPlayerPrefs(
+            string registryPath,
+            out Dictionary<string, object> prefs)
+        {
+            prefs = new Dictionary<string, object>(StringComparer.Ordinal);
             IntPtr hKey;
             int openResult = RegOpenKeyEx(HKeyCurrentUser, registryPath, 0, KeyRead, out hKey);
-            
+
             if (openResult != ErrorSuccess)
             {
-                Debug.LogWarning($"[PlayerPrefsRuntime] Windows registry key not found or inaccessible: {registryPath}");
-                return prefs;
+                if (openResult == ErrorFileNotFound || openResult == ErrorPathNotFound)
+                {
+                    Debug.Log($"[PlayerPrefsRuntime] Windows PlayerPrefs registry key does not exist; the store is empty: {registryPath}");
+                    return true;
+                }
+
+                Debug.LogWarning($"[PlayerPrefsRuntime] Windows registry key is inaccessible: {registryPath}. Error: {openResult}");
+                return false;
             }
 
             try
             {
-                EnumerateValues(hKey, prefs);
+                return EnumerateValues(hKey, prefs);
             }
             finally
             {
                 RegCloseKey(hKey);
             }
-
-            return prefs;
         }
 
-        private static void EnumerateValues(IntPtr hKey, Dictionary<string, object> prefs)
+        private static bool EnumerateValues(IntPtr hKey, Dictionary<string, object> prefs)
         {
             uint index = 0;
+            bool isComplete = true;
             byte[] dataBuffer = new byte[InitialDataCapacity];
             uint dataBufferSize = (uint)dataBuffer.Length;
 
@@ -92,22 +103,62 @@ namespace DmytroUdovychenko.PlayerPrefsRuntimeTool
 
                 if (result == ErrorNoMoreItems)
                 {
-                    break;
+                    return isComplete;
+                }
+
+                if (result == ErrorMoreData)
+                {
+                    // ReadValue already logged why it gave up on this value. Skip it rather than
+                    // abandoning the remaining entries, but never report the snapshot as complete.
+                    isComplete = false;
+                    index++;
+                    continue;
                 }
 
                 if (result != ErrorSuccess)
                 {
                     Debug.LogWarning($"[PlayerPrefsRuntime] Failed to enumerate registry value at index {index}. Error: {result}");
-                    break;
+                    return false;
                 }
 
                 string rawKey = valueName.ToString(0, (int)valueNameSize);
-                string normalizedKey = NormalizeKey(rawKey);
+                if (string.IsNullOrEmpty(rawKey))
+                {
+                    // PlayerPrefs.DeleteAll may still remove an assigned default value.
+                    // Keep ordinary reads focused on named PlayerPrefs, but do not claim
+                    // that a destructive backup covers the complete registry key.
+                    isComplete = false;
+                    index++;
+                    continue;
+                }
 
-                object decodedValue = DecodeRegistryValue(type, dataBuffer, dataSize);
+                string normalizedKey = PlayerPrefsRuntimeRegistryValueDecoder.NormalizeKey(rawKey);
+                if (string.IsNullOrEmpty(normalizedKey))
+                {
+                    Debug.LogWarning($"[PlayerPrefsRuntime] Registry value at index {index} normalized to an empty key.");
+                    isComplete = false;
+                    index++;
+                    continue;
+                }
+
+                object decodedValue = PlayerPrefsRuntimeRegistryValueDecoder.DecodeRegistryValue(type, dataBuffer, dataSize);
                 if (decodedValue != null)
                 {
-                    prefs[normalizedKey] = decodedValue;
+                    if (prefs.ContainsKey(normalizedKey))
+                    {
+                        prefs[normalizedKey] = decodedValue;
+                        Debug.LogWarning($"[PlayerPrefsRuntime] Multiple registry values normalize to key '{normalizedKey}'. Last value retained.");
+                        isComplete = false;
+                    }
+                    else
+                    {
+                        prefs[normalizedKey] = decodedValue;
+                    }
+                }
+                else
+                {
+                    Debug.LogWarning($"[PlayerPrefsRuntime] Registry value '{rawKey}' could not be decoded losslessly.");
+                    isComplete = false;
                 }
 
                 index++;
@@ -141,15 +192,46 @@ namespace DmytroUdovychenko.PlayerPrefsRuntimeTool
 
                 if (result == ErrorMoreData)
                 {
-                    if (currentNameSize > valueName.Capacity)
+                    // RegEnumValue reports the required size only for the data buffer; when the
+                    // *name* buffer is the short one it leaves lpcchValueName untouched (the docs
+                    // point at RegQueryInfoKey for that). Growing purely on the reported sizes
+                    // therefore spins forever on a long value name, so every retry has to enlarge
+                    // at least one buffer or bail out.
+                    if (currentDataSize > MaxDataCapacity)
                     {
-                        valueName.EnsureCapacity((int)(currentNameSize + 1));
+                        Debug.LogWarning($"[PlayerPrefsRuntime] Registry value at index {index} needs {currentDataSize} data bytes, above the {MaxDataCapacity} byte limit. Entry skipped.");
+                        dataSize = 0;
+                        return ErrorMoreData;
                     }
+
+                    bool grew = false;
 
                     if (currentDataSize > dataBuffer.Length)
                     {
                         dataBufferSize = currentDataSize;
                         Array.Resize(ref dataBuffer, (int)dataBufferSize);
+                        grew = true;
+                    }
+                    else if (valueName.Capacity < MaxValueNameCapacity)
+                    {
+                        // The data buffer was big enough, so the name buffer is what fell short.
+                        // Double it (honouring a reported size if the API did supply one).
+                        int nextCapacity = Math.Min(
+                            MaxValueNameCapacity,
+                            Math.Max((int)currentNameSize + 1, valueName.Capacity * 2));
+
+                        if (nextCapacity > valueName.Capacity)
+                        {
+                            valueName.EnsureCapacity(nextCapacity);
+                            grew = true;
+                        }
+                    }
+
+                    if (!grew)
+                    {
+                        Debug.LogWarning($"[PlayerPrefsRuntime] Registry value at index {index} exceeds the supported name length ({MaxValueNameCapacity} characters). Entry skipped.");
+                        dataSize = 0;
+                        return ErrorMoreData;
                     }
 
                     valueNameSize = (uint)valueName.Capacity;
@@ -168,82 +250,6 @@ namespace DmytroUdovychenko.PlayerPrefsRuntimeTool
 
                 return result;
             }
-        }
-
-        private static string NormalizeKey(string rawKey)
-        {
-            if (string.IsNullOrEmpty(rawKey))
-            {
-                return "(Unnamed)";
-            }
-
-            return s_hashSuffixRegex.Replace(rawKey, string.Empty);
-        }
-
-        private static object DecodeRegistryValue(uint type, byte[] data, uint dataSize)
-        {
-            switch (type)
-            {
-                case RegSz:
-                case RegExpandSz:
-                    return DecodeUnicodeString(data, dataSize);
-                case RegDword:
-                    return dataSize >= 4 ? BitConverter.ToInt32(data, 0) : null;
-                case RegQword:
-                    return dataSize >= 8 ? BitConverter.ToInt64(data, 0) : null;
-                case RegBinary:
-                    return DecodeBinaryValue(data, dataSize);
-                default:
-                    Debug.LogWarning($"[PlayerPrefsRuntime] Unsupported registry value type {type}");
-                    return null;
-            }
-        }
-
-        private static object DecodeUnicodeString(byte[] data, uint dataSize)
-        {
-            if (data == null || dataSize <= 2)
-            {
-                return string.Empty;
-            }
-
-            int bytes = Math.Max(0, (int)dataSize - 2); // Remove terminator.
-            string stringValue = Encoding.Unicode.GetString(data, 0, bytes);
-
-            if (float.TryParse(stringValue, NumberStyles.Float, CultureInfo.InvariantCulture, out float floatValue))
-            {
-                return floatValue;
-            }
-
-            return stringValue;
-        }
-
-        private static object DecodeBinaryValue(byte[] data, uint dataSize)
-        {
-            if (data == null || dataSize == 0)
-            {
-                return null;
-            }
-
-            if (dataSize == sizeof(float))
-            {
-                return BitConverter.ToSingle(data, 0);
-            }
-
-            int length = (int)dataSize;
-            if (data[length - 1] == 0)
-            {
-                length--;
-            }
-
-            string stringValue = Encoding.UTF8.GetString(data, 0, length);
-            if (!string.IsNullOrEmpty(stringValue))
-            {
-                return stringValue;
-            }
-
-            byte[] copy = new byte[dataSize];
-            Buffer.BlockCopy(data, 0, copy, 0, (int)dataSize);
-            return copy;
         }
     }
 }

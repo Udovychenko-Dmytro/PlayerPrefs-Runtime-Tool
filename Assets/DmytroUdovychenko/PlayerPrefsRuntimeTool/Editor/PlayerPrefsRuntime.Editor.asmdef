@@ -1,0 +1,20 @@
+{
+    "name": "PlayerPrefsRuntime.Editor",
+    "rootNamespace": "DmytroUdovychenko.PlayerPrefsRuntimeTool.Editor",
+    "references": [
+        "PlayerPrefsRuntime"
+    ],
+    "includePlatforms": [
+        "Editor"
+    ],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [
+        "PLAYER_PREFS_RUNTIME_TOOL"
+    ],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

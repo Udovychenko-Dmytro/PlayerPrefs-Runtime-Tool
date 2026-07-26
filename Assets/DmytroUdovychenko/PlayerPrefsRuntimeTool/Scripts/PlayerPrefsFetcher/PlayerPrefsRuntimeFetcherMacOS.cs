@@ -19,7 +19,9 @@ namespace DmytroUdovychenko.PlayerPrefsRuntimeTool
     /// macOS standalone implementation for retrieving PlayerPrefs at runtime.
     /// Uses native macOS APIs via P/Invoke to access PlayerPrefs data.
     /// </summary>
-    public class PlayerPrefsRuntimeFetcherMacOS : IPlayerPrefsRuntimeFetcher
+    public class PlayerPrefsRuntimeFetcherMacOS :
+        IPlayerPrefsRuntimeFetcher,
+        IPlayerPrefsRuntimeFetcherWithStatus
     {
         [DllImport("__Internal")]
         private static extern System.IntPtr GetPlayerPrefsJSON();
@@ -33,8 +35,18 @@ namespace DmytroUdovychenko.PlayerPrefsRuntimeTool
         /// <returns>A dictionary containing all PlayerPrefs keys and values.</returns>
         public Dictionary<string, object> GetAllPlayerPrefs()
         {
-            Dictionary<string, object> prefs = new Dictionary<string, object>();
+            TryGetAllPlayerPrefs(out Dictionary<string, object> prefs);
+            return prefs;
+        }
 
+        bool IPlayerPrefsRuntimeFetcherWithStatus.TryGetAllPlayerPrefs(out Dictionary<string, object> prefs)
+        {
+            return TryGetAllPlayerPrefs(out prefs);
+        }
+
+        private static bool TryGetAllPlayerPrefs(out Dictionary<string, object> prefs)
+        {
+            prefs = new Dictionary<string, object>();
             try
             {
                 Debug.Log("[PlayerPrefsRuntime] Calling native method GetPlayerPrefsJSON() on macOS");
@@ -43,7 +55,7 @@ namespace DmytroUdovychenko.PlayerPrefsRuntimeTool
                 if (jsonPtr == System.IntPtr.Zero)
                 {
                     Debug.LogError("[PlayerPrefsRuntime] Received null pointer for JSON from macOS native code.");
-                    return prefs;
+                    return false;
                 }
 
                 string jsonPrefs = Marshal.PtrToStringAnsi(jsonPtr);
@@ -53,20 +65,27 @@ namespace DmytroUdovychenko.PlayerPrefsRuntimeTool
 
                 if (!string.IsNullOrEmpty(jsonPrefs))
                 {
-                    prefs = DeserializeJSON(jsonPrefs);
+                    if (!TryDeserializeJSON(jsonPrefs, out prefs))
+                    {
+                        return false;
+                    }
                 }
                 else
                 {
                     Debug.LogWarning("[PlayerPrefsRuntime] Received empty JSON from macOS PlayerPrefs.");
+                    return false;
                 }
             }
             catch (System.Exception e)
             {
                 Debug.LogError($"[PlayerPrefsRuntime] Error fetching PlayerPrefs on macOS: {e.Message}\n{e.StackTrace}");
+                return false;
             }
 
             Debug.Log($"[PlayerPrefsRuntime] Successfully retrieved {prefs.Count} PlayerPrefs entries on macOS");
-            return prefs;
+            // Native failures and a genuinely empty plist both currently arrive as "{}".
+            // Without native status metadata, an empty result cannot be trusted for deletion.
+            return prefs.Count > 0;
         }
 
         /// <summary>
@@ -74,27 +93,27 @@ namespace DmytroUdovychenko.PlayerPrefsRuntimeTool
         /// </summary>
         /// <param name="json">JSON string containing PlayerPrefs data</param>
         /// <returns>Dictionary with normalized PlayerPrefs data</returns>
-        private Dictionary<string, object> DeserializeJSON(string json)
+        private static bool TryDeserializeJSON(string json, out Dictionary<string, object> dict)
         {
-            Dictionary<string, object> dict = new Dictionary<string, object>();
+            dict = new Dictionary<string, object>();
             if (string.IsNullOrEmpty(json))
             {
                 Debug.LogError("[PlayerPrefsRuntime] Received empty JSON for deserialization on macOS.");
-                return dict;
+                return false;
             }
 
             try
             {
                 dict = JsonConvert.DeserializeObject<Dictionary<string, object>>(json);
-                dict = PlayerPrefsRuntimeJsonHelper.NormalizeDictionary(dict);
+                dict = PlayerPrefsRuntimeJsonHelper.NormalizeDictionary(dict, out bool isComplete);
                 Debug.Log("[PlayerPrefsRuntime] JSON deserialization successful on macOS.");
+                return isComplete;
             }
             catch (System.Exception e)
             {
                 Debug.LogError($"[PlayerPrefsRuntime] Error deserializing JSON on macOS: {e.Message}\nJSON: {json}");
+                return false;
             }
-
-            return dict;
         }
     }
 }
